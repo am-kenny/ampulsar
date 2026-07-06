@@ -16,6 +16,19 @@ type tokenResponse struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
+type twitchResponse[T any] struct {
+	Data []T `json:"data"`
+}
+
+type userData struct {
+	ID              string `json:"id"`
+	Login           string `json:"login"`
+	DisplayName     string `json:"display_name"`
+	ProfileImageUrl string `json:"profile_image_url"`
+	OfflineImageUrl string `json:"offline_image_url"`
+	CreatedAt       string `json:"created_at"`
+}
+
 type streamData struct {
 	ID           string `json:"id"`
 	GameName     string `json:"game_name"`
@@ -25,8 +38,14 @@ type streamData struct {
 	ThumbnailURL string `json:"thumbnail_url"`
 }
 
-type streamsResponse struct {
-	Data []streamData `json:"data"`
+type videoData struct {
+	ID           string `json:"id"`
+	StreamID     string `json:"stream_id"`
+	Title        string `json:"title"`
+	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnail_url"`
+	Type         string `json:"type"`
+	Duration     string `json:"duration"`
 }
 
 // TODO: make TwitchClient safe for concurrent use.
@@ -108,21 +127,27 @@ func (tc *TwitchClient) ensureToken(ctx context.Context) error {
 	return nil
 }
 
-func (tc *TwitchClient) FetchStreamByUsername(ctx context.Context, channelName string) (*streamData, error) {
+func (tc *TwitchClient) callGetHelix(ctx context.Context, path string, params url.Values, result any) error {
 	if err := tc.ensureToken(ctx); err != nil {
-		return nil, err
+		return err
 	}
 
-	streamsURL := twitchBaseURL()
-	streamsURL.Path = "/helix/streams"
-
-	q := streamsURL.Query()
-	q.Set("user_login", channelName)
-	streamsURL.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamsURL.String(), nil)
+	base := twitchBaseURL()
+	u, err := url.JoinPath(base.String(), "helix", path)
 	if err != nil {
-		return nil, err
+		return err
+	}
+
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return err
+	}
+
+	parsed.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+tc.token)
@@ -130,24 +155,79 @@ func (tc *TwitchClient) FetchStreamByUsername(ctx context.Context, channelName s
 
 	resp, err := tc.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// body, _ := io.ReadAll(resp.Body)
+		// fmt.Println("raw response:", string(body))
 		io.Copy(io.Discard, resp.Body)
-		return nil, fmt.Errorf("check live request failed: %s", resp.Status)
+		return fmt.Errorf("%s request failed: %s", parsed.String(), resp.Status)
 	}
 
-	var sr streamsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (tc *TwitchClient) FetchUserByUsername(ctx context.Context, username string) (*userData, error) {
+	params := url.Values{}
+	params.Set("login", username)
+
+	var resp twitchResponse[userData]
+
+	if err := tc.callGetHelix(ctx, "users", params, &resp); err != nil {
 		return nil, err
 	}
 
-	if len(sr.Data) == 0 {
+	if len(resp.Data) == 0 {
 		return nil, nil
 	}
 
-	return &sr.Data[0], nil
+	return &resp.Data[0], nil
+}
+
+func (tc *TwitchClient) FetchStreamByUsername(ctx context.Context, username string) (*streamData, error) {
+	params := url.Values{}
+	params.Set("user_login", username)
+
+	var resp twitchResponse[streamData]
+
+	if err := tc.callGetHelix(ctx, "streams", params, &resp); err != nil {
+		return nil, err
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, nil
+	}
+
+	return &resp.Data[0], nil
+}
+
+func (tc *TwitchClient) FetchStreamArchiveByUserIdAndStreamID(ctx context.Context, userID, streamID string) (*videoData, error) {
+	params := url.Values{}
+	params.Set("user_id", userID)
+	params.Set("type", "archive")
+
+	var resp twitchResponse[videoData]
+
+	if err := tc.callGetHelix(ctx, "videos", params, &resp); err != nil {
+		return nil, err
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, nil
+	}
+
+	for _, v := range resp.Data {
+		if v.StreamID == streamID {
+			return &v, nil
+		}
+	}
+
+	return nil, nil
 }
