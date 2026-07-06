@@ -79,12 +79,11 @@ func (tc *TelegramClient) call(ctx context.Context, method string, params url.Va
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// body, _ := io.ReadAll(resp.Body)
+		// fmt.Println("raw response:", string(body))
 		io.Copy(io.Discard, resp.Body)
 		return fmt.Errorf("%s request failed: %s", method, resp.Status)
 	}
-
-	// body, _ := io.ReadAll(resp.Body)
-	// fmt.Println("raw response:", string(body))
 
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 		return err
@@ -94,9 +93,9 @@ func (tc *TelegramClient) call(ctx context.Context, method string, params url.Va
 }
 
 func (tc *TelegramClient) GetMe(ctx context.Context) error {
-	var gmr telegramResponse[user]
+	var resp telegramResponse[user]
 
-	if err := tc.call(ctx, "getMe", url.Values{}, &gmr); err != nil {
+	if err := tc.call(ctx, "getMe", url.Values{}, &resp); err != nil {
 		return err
 	}
 
@@ -108,13 +107,28 @@ func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string) 
 	params.Set("chat_id", chatID)
 	params.Set("text", text)
 
-	var mr telegramResponse[message]
+	var resp telegramResponse[message]
 
-	if err := tc.call(ctx, "sendMessage", params, &mr); err != nil {
+	if err := tc.call(ctx, "sendMessage", params, &resp); err != nil {
 		return 0, err
 	}
 
-	return mr.Result.MessageId, nil
+	return resp.Result.MessageId, nil
+}
+
+func (tc *TelegramClient) SendHTMLMessage(ctx context.Context, chatID, text string) (int, error) {
+	params := url.Values{}
+	params.Set("chat_id", chatID)
+	params.Set("text", text)
+	params.Set("parse_mode", "HTML")
+
+	var resp telegramResponse[message]
+
+	if err := tc.call(ctx, "sendMessage", params, &resp); err != nil {
+		return 0, err
+	}
+
+	return resp.Result.MessageId, nil
 }
 
 func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID, messageId, text string) error {
@@ -123,9 +137,9 @@ func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID, messageId
 	params.Set("message_id", messageId)
 	params.Set("text", text)
 
-	var mr telegramResponse[message]
+	var resp telegramResponse[message]
 
-	if err := tc.call(ctx, "editMessageText", params, &mr); err != nil {
+	if err := tc.call(ctx, "editMessageText", params, &resp); err != nil {
 		return err
 	}
 
