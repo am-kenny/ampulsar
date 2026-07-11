@@ -20,7 +20,7 @@ type twitchResponse[T any] struct {
 	Data []T `json:"data"`
 }
 
-type userData struct {
+type UserData struct {
 	ID              string `json:"id"`
 	Login           string `json:"login"`
 	DisplayName     string `json:"display_name"`
@@ -174,11 +174,11 @@ func (tc *TwitchClient) callGetHelix(ctx context.Context, path string, params ur
 	return nil
 }
 
-func (tc *TwitchClient) FetchUserByUsername(ctx context.Context, username string) (*userData, error) {
+func (tc *TwitchClient) FetchUserByUsername(ctx context.Context, username string) (*UserData, error) {
 	params := url.Values{}
 	params.Set("login", username)
 
-	var resp twitchResponse[userData]
+	var resp twitchResponse[UserData]
 
 	if err := tc.callGetHelix(ctx, "users", params, &resp); err != nil {
 		return nil, err

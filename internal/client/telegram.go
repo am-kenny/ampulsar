@@ -147,6 +147,23 @@ func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID, messageId
 
 }
 
+func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID, messageId, text string) error {
+	params := url.Values{}
+	params.Set("chat_id", chatID)
+	params.Set("message_id", messageId)
+	params.Set("text", text)
+	params.Set("parse_mode", "HTML")
+
+	var resp telegramResponse[message]
+
+	if err := tc.call(ctx, "editMessageText", params, &resp); err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
 func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID, messageId string) error {
 	params := url.Values{}
 	params.Set("chat_id", chatID)

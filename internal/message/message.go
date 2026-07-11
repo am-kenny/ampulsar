@@ -8,10 +8,9 @@ import (
 )
 
 type StreamEvent struct {
-	ChannelID   string
-	ChannelName string
-	Title       string
+	DisplayName string
 	Username    string
+	Title       string
 	Game        string
 
 	RecordingURL string
