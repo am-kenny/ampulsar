@@ -98,7 +98,7 @@ func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string,
 			s += http.StatusText(resp.StatusCode)
 		}
 		if result.ErrorCode != 0 {
-			s += strconv.Itoa(result.ErrorCode)
+			s += fmt.Sprintf(" (%d)", result.ErrorCode)
 		}
 		return errors.New(s)
 	}
