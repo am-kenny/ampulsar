@@ -1,14 +1,23 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
+)
+
+type ParseMode string
+
+const (
+	ParsePlainText ParseMode = ""
+	ParseHTML      ParseMode = "HTML"
+	ParseMarkdown  ParseMode = "MarkdownV2"
 )
 
 type telegramResponse[T any] struct {
@@ -24,13 +33,13 @@ type responseParameters struct {
 	MigrateToChatID int64 `json:"migrate_to_chat_id"`
 }
 
-type user struct {
+type User struct {
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
 }
 
 type message struct {
-	MessageId int `json:"message_id"`
+	MessageID int `json:"message_id"`
 }
 
 type ChatAdministratorRights struct {
@@ -38,6 +47,33 @@ type ChatAdministratorRights struct {
 	CanPostMessages bool `json:"can_post_messages"`
 	CanEditMessages bool `json:"can_edit_messages"`
 	CanPinMessages  bool `json:"can_pin_messages"`
+}
+
+type sendMessageRequest struct {
+	ChatID    string    `json:"chat_id"`
+	Text      string    `json:"text"`
+	ParseMode ParseMode `json:"parse_mode,omitempty"`
+}
+
+type editMessageTextRequest struct {
+	ChatID    string    `json:"chat_id"`
+	MessageID int       `json:"message_id"`
+	Text      string    `json:"text"`
+	ParseMode ParseMode `json:"parse_mode,omitempty"`
+}
+
+type pinChatMessageRequest struct {
+	ChatID    string `json:"chat_id"`
+	MessageID int    `json:"message_id"`
+}
+
+type setRightsRequest struct {
+	Rights      ChatAdministratorRights `json:"rights"`
+	ForChannels bool                    `json:"for_channels"`
+}
+
+type forChannelsRequest struct {
+	ForChannels bool `json:"for_channels"`
 }
 
 type TelegramClient struct {
@@ -52,31 +88,29 @@ func NewTelegramClient(botToken string) *TelegramClient {
 	}
 }
 
-func (tc *TelegramClient) telegramBaseURL() url.URL {
-	return url.URL{
+func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string, body any, result *telegramResponse[T]) error {
+	u := url.URL{
 		Scheme: "https",
 		Host:   "api.telegram.org",
-		Path:   "bot" + tc.botToken,
+		Path:   "/bot" + tc.botToken + "/" + method,
 	}
-}
 
-func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string, params url.Values, result *telegramResponse[T]) error {
-	base := tc.telegramBaseURL()
-	u, err := url.JoinPath(base.String(), method)
+	var reqBody io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal %s request: %w", method, err)
+		}
+		reqBody = bytes.NewReader(b)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), reqBody)
 	if err != nil {
 		return err
 	}
 
-	parsed, err := url.Parse(u)
-	if err != nil {
-		return err
-	}
-
-	parsed.RawQuery = params.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-	if err != nil {
-		return err
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := tc.httpClient.Do(req)
@@ -86,8 +120,15 @@ func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string,
 
 	defer resp.Body.Close()
 
-	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
-		return err
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("telegram %s: reading body: %w", method, err)
+	}
+
+	if err := json.Unmarshal(raw, result); err != nil {
+		return fmt.Errorf("telegram %s: %d %s: non-JSON body: %q",
+			method, resp.StatusCode, http.StatusText(resp.StatusCode),
+			bytes.TrimSpace(raw[:min(len(raw), 256)]))
 	}
 
 	if resp.StatusCode != http.StatusOK || !result.OK {
@@ -106,150 +147,112 @@ func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string,
 	return nil
 }
 
-func (tc *TelegramClient) GetMe(ctx context.Context) error {
-	var resp telegramResponse[user]
+func (tc *TelegramClient) GetMe(ctx context.Context) (User, error) {
+	var resp telegramResponse[User]
 
-	if err := callTelegram(ctx, tc, "getMe", url.Values{}, &resp); err != nil {
-		return err
+	if err := callTelegram(ctx, tc, "getMe", nil, &resp); err != nil {
+		return User{}, err
 	}
 
-	return nil
+	return resp.Result, nil
 }
 
-func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string) (int, error) {
-	params := url.Values{}
-	params.Set("chat_id", chatID)
-	params.Set("text", text)
+func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string, parseMode ParseMode) (int, error) {
+	body := sendMessageRequest{
+		ChatID:    chatID,
+		Text:      text,
+		ParseMode: parseMode,
+	}
 
 	var resp telegramResponse[message]
 
-	if err := callTelegram(ctx, tc, "sendMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "sendMessage", body, &resp); err != nil {
 		return 0, err
 	}
 
-	return resp.Result.MessageId, nil
+	return resp.Result.MessageID, nil
 }
 
 func (tc *TelegramClient) SendHTMLMessage(ctx context.Context, chatID, text string) (int, error) {
-	params := url.Values{}
-	params.Set("chat_id", chatID)
-	params.Set("text", text)
-	params.Set("parse_mode", "HTML")
-
-	var resp telegramResponse[message]
-
-	if err := callTelegram(ctx, tc, "sendMessage", params, &resp); err != nil {
-		return 0, err
-	}
-
-	return resp.Result.MessageId, nil
+	return tc.SendMessage(ctx, chatID, text, "HTML")
 }
 
-func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID, messageId, text string) error {
-	params := url.Values{}
-	params.Set("chat_id", chatID)
-	params.Set("message_id", messageId)
-	params.Set("text", text)
+func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID string, messageId int, text string, parseMode ParseMode) error {
+	body := editMessageTextRequest{
+		ChatID:    chatID,
+		MessageID: messageId,
+		Text:      text,
+		ParseMode: parseMode,
+	}
 
 	var resp telegramResponse[message]
 
-	if err := callTelegram(ctx, tc, "editMessageText", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "editMessageText", body, &resp); err != nil {
 		return err
 	}
 
 	return nil
-
 }
 
-func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID, messageId, text string) error {
-	params := url.Values{}
-	params.Set("chat_id", chatID)
-	params.Set("message_id", messageId)
-	params.Set("text", text)
-	params.Set("parse_mode", "HTML")
+func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID string, messageId int, text string) error {
+	return tc.EditMessageText(ctx, chatID, messageId, text, "HTML")
+}
 
-	var resp telegramResponse[message]
-
-	if err := callTelegram(ctx, tc, "editMessageText", params, &resp); err != nil {
-		return err
+func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID string, messageId int) error {
+	body := pinChatMessageRequest{
+		ChatID:    chatID,
+		MessageID: messageId,
 	}
-
-	return nil
-
-}
-
-func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID, messageId string) error {
-	params := url.Values{}
-	params.Set("chat_id", chatID)
-	params.Set("message_id", messageId)
 
 	var resp telegramResponse[bool]
 
-	if err := callTelegram(ctx, tc, "pinChatMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "pinChatMessage", body, &resp); err != nil {
 		return err
 	}
 
-	if !resp.Result {
-		return fmt.Errorf("pinChatMessage: telegram returned false")
-	}
-
 	return nil
-
 }
 
-func (tc *TelegramClient) UnpinChatMessage(ctx context.Context, chatID, messageId string) error {
-	params := url.Values{}
-	params.Set("chat_id", chatID)
-	params.Set("message_id", messageId)
+func (tc *TelegramClient) UnpinChatMessage(ctx context.Context, chatID string, messageId int) error {
+	body := pinChatMessageRequest{
+		ChatID:    chatID,
+		MessageID: messageId,
+	}
 
 	var resp telegramResponse[bool]
 
-	if err := callTelegram(ctx, tc, "unpinChatMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "unpinChatMessage", body, &resp); err != nil {
 		return err
 	}
 
-	if !resp.Result {
-		return fmt.Errorf("unpinChatMessage: telegram returned false")
-	}
-
 	return nil
-
 }
 
 func (tc *TelegramClient) SetMyDefaultAdministratorRights(ctx context.Context, rights ChatAdministratorRights, forChannels bool) error {
-	encoded, err := json.Marshal(rights)
-	if err != nil {
-		return err
+	body := setRightsRequest{
+		Rights:      rights,
+		ForChannels: forChannels,
 	}
-
-	params := url.Values{}
-	params.Set("rights", string(encoded))
-	params.Set("for_channels", strconv.FormatBool(forChannels))
 
 	var resp telegramResponse[bool]
 
-	if err := callTelegram(ctx, tc, "setMyDefaultAdministratorRights", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "setMyDefaultAdministratorRights", body, &resp); err != nil {
 		return err
 	}
 
-	if !resp.Result {
-		return fmt.Errorf("setMyDefaultAdministratorRights: telegram returned false")
-	}
-
 	return nil
-
 }
 
 func (tc *TelegramClient) GetMyDefaultAdministratorRights(ctx context.Context, forChannels bool) (ChatAdministratorRights, error) {
-	params := url.Values{}
-	params.Set("for_channels", strconv.FormatBool(forChannels))
+	body := forChannelsRequest{
+		ForChannels: forChannels,
+	}
 
 	var resp telegramResponse[ChatAdministratorRights]
 
-	if err := callTelegram(ctx, tc, "getMyDefaultAdministratorRights", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "getMyDefaultAdministratorRights", body, &resp); err != nil {
 		return ChatAdministratorRights{}, err
 	}
 
 	return resp.Result, nil
-
 }
