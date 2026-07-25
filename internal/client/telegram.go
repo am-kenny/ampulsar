@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,8 +12,16 @@ import (
 )
 
 type telegramResponse[T any] struct {
-	OK     bool `json:"ok"`
-	Result T    `json:"result"`
+	OK          bool                `json:"ok"`
+	Result      T                   `json:"result"`
+	Description string              `json:"description"`
+	ErrorCode   int                 `json:"error_code"`
+	Parameters  *responseParameters `json:"parameters"`
+}
+
+type responseParameters struct {
+	RetryAfter      int   `json:"retry_after"`
+	MigrateToChatID int64 `json:"migrate_to_chat_id"`
 }
 
 type user struct {
@@ -52,7 +60,7 @@ func (tc *TelegramClient) telegramBaseURL() url.URL {
 	}
 }
 
-func (tc *TelegramClient) call(ctx context.Context, method string, params url.Values, result any) error {
+func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string, params url.Values, result *telegramResponse[T]) error {
 	base := tc.telegramBaseURL()
 	u, err := url.JoinPath(base.String(), method)
 	if err != nil {
@@ -78,15 +86,21 @@ func (tc *TelegramClient) call(ctx context.Context, method string, params url.Va
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		// body, _ := io.ReadAll(resp.Body)
-		// fmt.Println("raw response:", string(body))
-		io.Copy(io.Discard, resp.Body)
-		return fmt.Errorf("%s request failed: %s", method, resp.Status)
-	}
-
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 		return err
+	}
+
+	if resp.StatusCode != http.StatusOK || !result.OK {
+		s := fmt.Sprintf("telegram %s: %d ", method, resp.StatusCode)
+		if result.Description != "" {
+			s += result.Description
+		} else {
+			s += http.StatusText(resp.StatusCode)
+		}
+		if result.ErrorCode != 0 {
+			s += strconv.Itoa(result.ErrorCode)
+		}
+		return errors.New(s)
 	}
 
 	return nil
@@ -95,7 +109,7 @@ func (tc *TelegramClient) call(ctx context.Context, method string, params url.Va
 func (tc *TelegramClient) GetMe(ctx context.Context) error {
 	var resp telegramResponse[user]
 
-	if err := tc.call(ctx, "getMe", url.Values{}, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "getMe", url.Values{}, &resp); err != nil {
 		return err
 	}
 
@@ -109,7 +123,7 @@ func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string) 
 
 	var resp telegramResponse[message]
 
-	if err := tc.call(ctx, "sendMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "sendMessage", params, &resp); err != nil {
 		return 0, err
 	}
 
@@ -124,7 +138,7 @@ func (tc *TelegramClient) SendHTMLMessage(ctx context.Context, chatID, text stri
 
 	var resp telegramResponse[message]
 
-	if err := tc.call(ctx, "sendMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "sendMessage", params, &resp); err != nil {
 		return 0, err
 	}
 
@@ -139,7 +153,7 @@ func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID, messageId
 
 	var resp telegramResponse[message]
 
-	if err := tc.call(ctx, "editMessageText", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "editMessageText", params, &resp); err != nil {
 		return err
 	}
 
@@ -156,7 +170,7 @@ func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID, messa
 
 	var resp telegramResponse[message]
 
-	if err := tc.call(ctx, "editMessageText", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "editMessageText", params, &resp); err != nil {
 		return err
 	}
 
@@ -171,7 +185,7 @@ func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID, messageId 
 
 	var resp telegramResponse[bool]
 
-	if err := tc.call(ctx, "pinChatMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "pinChatMessage", params, &resp); err != nil {
 		return err
 	}
 
@@ -190,7 +204,7 @@ func (tc *TelegramClient) UnpinChatMessage(ctx context.Context, chatID, messageI
 
 	var resp telegramResponse[bool]
 
-	if err := tc.call(ctx, "unpinChatMessage", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "unpinChatMessage", params, &resp); err != nil {
 		return err
 	}
 
@@ -214,7 +228,7 @@ func (tc *TelegramClient) SetMyDefaultAdministratorRights(ctx context.Context, r
 
 	var resp telegramResponse[bool]
 
-	if err := tc.call(ctx, "setMyDefaultAdministratorRights", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "setMyDefaultAdministratorRights", params, &resp); err != nil {
 		return err
 	}
 
@@ -232,7 +246,7 @@ func (tc *TelegramClient) GetMyDefaultAdministratorRights(ctx context.Context, f
 
 	var resp telegramResponse[ChatAdministratorRights]
 
-	if err := tc.call(ctx, "getMyDefaultAdministratorRights", params, &resp); err != nil {
+	if err := callTelegram(ctx, tc, "getMyDefaultAdministratorRights", params, &resp); err != nil {
 		return ChatAdministratorRights{}, err
 	}
 
