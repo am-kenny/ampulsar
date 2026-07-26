@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -62,7 +61,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 		state.streamID = stream.ID
 		state.messageID = messageID
 
-		if err := tg.PinChatMessage(ctx, tgChatID, strconv.Itoa(messageID)); err != nil {
+		if err := tg.PinChatMessage(ctx, tgChatID, messageID); err != nil {
 			log.Println(err)
 		}
 
@@ -95,7 +94,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			return
 		}
 
-		if err := tg.EditHTMLMessageText(ctx, tgChatID, strconv.Itoa(state.messageID), text); err != nil {
+		if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
 			log.Println(err)
 			return
 		}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,6 +87,8 @@ func NewTelegramClient(botToken string) *TelegramClient {
 	}
 }
 
+// callTelegram performs a Telegram API call with method POST and JSON body
+// This is a function and not a method to allow type parameter
 func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string, body any, result *telegramResponse[T]) error {
 	u := url.URL{
 		Scheme: "https",
@@ -132,16 +133,13 @@ func callTelegram[T any](ctx context.Context, tc *TelegramClient, method string,
 	}
 
 	if resp.StatusCode != http.StatusOK || !result.OK {
-		s := fmt.Sprintf("telegram %s: %d ", method, resp.StatusCode)
-		if result.Description != "" {
-			s += result.Description
-		} else {
-			s += http.StatusText(resp.StatusCode)
+		return &TelegramAPIError{
+			Method:      method,
+			StatusCode:  resp.StatusCode,
+			Description: result.Description,
+			ErrorCode:   result.ErrorCode,
+			parameters:  result.Parameters,
 		}
-		if result.ErrorCode != 0 {
-			s += fmt.Sprintf(" (%d)", result.ErrorCode)
-		}
-		return errors.New(s)
 	}
 
 	return nil
@@ -174,7 +172,7 @@ func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string, 
 }
 
 func (tc *TelegramClient) SendHTMLMessage(ctx context.Context, chatID, text string) (int, error) {
-	return tc.SendMessage(ctx, chatID, text, "HTML")
+	return tc.SendMessage(ctx, chatID, text, ParseHTML)
 }
 
 func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID string, messageId int, text string, parseMode ParseMode) error {
@@ -195,7 +193,7 @@ func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID string, me
 }
 
 func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID string, messageId int, text string) error {
-	return tc.EditMessageText(ctx, chatID, messageId, text, "HTML")
+	return tc.EditMessageText(ctx, chatID, messageId, text, ParseHTML)
 }
 
 func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID string, messageId int) error {
@@ -255,4 +253,39 @@ func (tc *TelegramClient) GetMyDefaultAdministratorRights(ctx context.Context, f
 	}
 
 	return resp.Result, nil
+}
+
+type TelegramAPIError struct {
+	Method      string
+	StatusCode  int
+	Description string
+	ErrorCode   int
+	parameters  *responseParameters
+}
+
+func (e *TelegramAPIError) Error() string {
+	s := fmt.Sprintf("telegram %s: %d ", e.Method, e.StatusCode)
+	if e.Description != "" {
+		s += e.Description
+	} else {
+		s += http.StatusText(e.StatusCode)
+	}
+	if e.ErrorCode != 0 && e.ErrorCode != e.StatusCode {
+		s += fmt.Sprintf(" (error_code %d)", e.ErrorCode)
+	}
+	return s
+}
+
+func (e *TelegramAPIError) RetryAfter() time.Duration {
+	if e.parameters != nil && e.parameters.RetryAfter > 0 {
+		return time.Duration(e.parameters.RetryAfter) * time.Second
+	}
+	return 0
+}
+
+func (e *TelegramAPIError) MigrateToChatID() int64 {
+	if e.parameters != nil {
+		return e.parameters.MigrateToChatID
+	}
+	return 0
 }
