@@ -2,8 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,10 +19,10 @@ type streamState struct {
 	messageID int
 }
 
-func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, state *streamState) {
+func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, state *streamState, shouldPin bool, onEnd config.EndPolicy, templateStyle, templateLanguage string) {
 	stream, err := tc.FetchStreamByUsername(ctx, user.Login)
 	if err != nil {
-		// log and continue — a transient API error shouldn't crash the loop
+		slog.Error("fetch stream failed", "err", err, "channel", user.Login)
 		return
 	}
 
@@ -40,20 +39,20 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 		// tg.SendMessage(...) -> capture messageID
 		// update state: isLive=true, streamID=stream.ID, messageID=...
 
-		fmt.Println("NOW LIVE")
+		slog.Info("NOW LIVE")
 
 		streamEvent.Title = stream.Title
 		streamEvent.Game = stream.GameName
 
-		text, err := message.FormatLive("default", "ru", streamEvent)
+		text, err := message.FormatLive(templateStyle, templateLanguage, streamEvent)
 		if err != nil {
-			log.Println(err)
+			slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
 			return
 		}
 
 		messageID, err := tg.SendHTMLMessage(ctx, tgChatID, text)
 		if err != nil {
-			log.Println(err)
+			slog.Warn("message send failed", "err", err, "tgChatID", tgChatID)
 			return
 		}
 
@@ -61,8 +60,10 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 		state.streamID = stream.ID
 		state.messageID = messageID
 
-		if err := tg.PinChatMessage(ctx, tgChatID, messageID); err != nil {
-			log.Println(err)
+		if shouldPin {
+			if err := tg.PinChatMessage(ctx, tgChatID, messageID); err != nil {
+				slog.Warn("pin message failed", "err", err, "tgChatID", tgChatID)
+			}
 		}
 
 	case stream == nil && state.isLive:
@@ -72,31 +73,41 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 		// tg.SendMessage(...)
 		// reset state: isLive=false, streamID="", messageID=0
 
-		fmt.Println("NOW OFFLINE")
+		slog.Info("NOW OFFLINE")
 
-		recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, state.streamID)
-		if err != nil {
-			log.Println(err)
-			return
+		if shouldPin {
+			if err := tg.UnpinChatMessage(ctx, tgChatID, state.messageID); err != nil {
+				slog.Warn("unpin message failed", "err", err, "tgChatID", tgChatID)
+			}
 		}
 
-		if recording != nil {
-			streamEvent.RecordingURL = recording.URL
-			streamEvent.Duration = recording.Duration
-			streamEvent.Title = recording.Title
-		} else {
-			return
+		if onEnd != config.EndPolicyNone {
+			recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, state.streamID)
+			if err != nil {
+				slog.Warn("fetch stream archive failed", "err", err, "streamID", state.streamID)
+				return
+			}
+
+			if recording != nil {
+				streamEvent.RecordingURL = recording.URL
+				streamEvent.Duration = recording.Duration
+				streamEvent.Title = recording.Title
+			} else {
+				return
+			}
 		}
 
-		text, err := message.FormatWentOffline("default", "ru", streamEvent)
-		if err != nil {
-			log.Println(err)
-			return
-		}
+		if onEnd == config.EndPolicyEditInPlace {
+			text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
+			if err != nil {
+				slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
+				return
+			}
 
-		if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
-			log.Println(err)
-			return
+			if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
+				slog.Warn("edit message failed", "err", err, "tgChatID", tgChatID)
+				return
+			}
 		}
 
 		state.isLive = false
@@ -105,26 +116,21 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 	default:
 		// no transition — do nothing
-		fmt.Println("-")
+		slog.Info("OFFLINE")
 	}
 }
 
 func main() {
-	// 7. loop:
-	//      select {
-	//      case <-ctx.Done(): return
-	//      case <-ticker.C:
-	//          poll(ctx, twitchClient, telegramClient, cfg, &state)
-	//      }
-	fmt.Println("Starting AmPulsar")
-	fmt.Println("Loading config")
+	slog.Info("Starting AmPulsar")
+	slog.Info("Loading config")
 
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal(fmt.Errorf("Application misconfigured: %s", err))
-	} else {
-		fmt.Println("Configuration loaded successfully")
+		slog.Error("config load failed", "err", err)
+		os.Exit(1)
 	}
+
+	slog.Info("Configuration loaded successfully")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -134,22 +140,25 @@ func main() {
 
 	user, err := twitchClient.FetchUserByUsername(ctx, cfg.Twitch.ChannelName)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("fetch twitch channel failed", "err", err, "channel", cfg.Twitch.ChannelName)
+		os.Exit(1)
 	}
 
 	state := streamState{}
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(cfg.Poll.Interval)
 
 	defer ticker.Stop()
+
+	poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, &state, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("Shutting down")
+			slog.Info("Shutting down")
 			return
 		case <-ticker.C:
-			poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, &state)
+			poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, &state, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 		}
 	}
 
