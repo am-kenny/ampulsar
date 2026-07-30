@@ -61,7 +61,7 @@ type editMessageTextRequest struct {
 	ParseMode ParseMode `json:"parse_mode,omitempty"`
 }
 
-type pinChatMessageRequest struct {
+type chatMessageRequest struct {
 	ChatID    string `json:"chat_id"`
 	MessageID int    `json:"message_id"`
 }
@@ -196,8 +196,23 @@ func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID string
 	return tc.EditMessageText(ctx, chatID, messageId, text, ParseHTML)
 }
 
+func (tc *TelegramClient) DeleteMessage(ctx context.Context, chatID string, messageId int) error {
+	body := chatMessageRequest{
+		ChatID:    chatID,
+		MessageID: messageId,
+	}
+
+	var resp telegramResponse[bool]
+
+	if err := callTelegram(ctx, tc, "deleteMessage", body, &resp); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID string, messageId int) error {
-	body := pinChatMessageRequest{
+	body := chatMessageRequest{
 		ChatID:    chatID,
 		MessageID: messageId,
 	}
@@ -212,7 +227,7 @@ func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID string, mes
 }
 
 func (tc *TelegramClient) UnpinChatMessage(ctx context.Context, chatID string, messageId int) error {
-	body := pinChatMessageRequest{
+	body := chatMessageRequest{
 		ChatID:    chatID,
 		MessageID: messageId,
 	}
