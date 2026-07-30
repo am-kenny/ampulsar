@@ -1,3 +1,3 @@
 🔴 Now live: {{if .Title }}{{ trimRedDot .Title}}{{else}}{{.DisplayName}}{{end}}
 
-▶️ <a href="https://www.twitch.tv/{{.Username}}">{{.DisplayName}}{{ if .Game}} | {{.Game}}{{end}}</a>
+▶️ <a href="https://www.twitch.tv/{{.Username}}{{ if .Timestamp }}?ts={{ .Timestamp }}{{end}}">{{.DisplayName}}{{ if .Game}} | {{.Game}}{{end}}</a>

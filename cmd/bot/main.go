@@ -29,6 +29,8 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 	streamEvent := message.StreamEvent{
 		DisplayName: user.DisplayName,
 		Username:    user.Login,
+
+		Timestamp: time.Now().Unix(),
 	}
 
 	switch {

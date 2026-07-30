@@ -15,6 +15,8 @@ type StreamEvent struct {
 
 	RecordingURL string
 	Duration     string
+
+	Timestamp int64
 }
 
 var funcMap = template.FuncMap{
