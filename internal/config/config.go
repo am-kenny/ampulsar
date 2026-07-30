@@ -36,12 +36,13 @@ type EndPolicy string
 const (
 	EndPolicyEditInPlace EndPolicy = "edit_in_place"
 	EndPolicyNewMessage  EndPolicy = "new_message"
+	EndPolicyDelete      EndPolicy = "delete"
 	EndPolicyNone        EndPolicy = "none"
 )
 
 func (p EndPolicy) Valid() bool {
 	switch p {
-	case EndPolicyEditInPlace, EndPolicyNewMessage, EndPolicyNone:
+	case EndPolicyEditInPlace, EndPolicyNewMessage, EndPolicyDelete, EndPolicyNone:
 		return true
 	}
 	return false
@@ -194,7 +195,7 @@ func parseEndPolicy(dst *EndPolicy) func(string) error {
 	return func(v string) error {
 		p := EndPolicy(v)
 		if !p.Valid() {
-			return fmt.Errorf("want edit_in_place, new_message or none, got %q", v)
+			return fmt.Errorf("want edit_in_place, new_message, delete or none, got %q", v)
 		}
 		*dst = p
 		return nil

@@ -97,17 +97,29 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			}
 		}
 
-		if onEnd == config.EndPolicyEditInPlace {
-			text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
-			if err != nil {
-				slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
-				return
+		switch onEnd {
+		case config.EndPolicyEditInPlace:
+			{
+
+				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
+				if err != nil {
+					slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
+					return
+				}
+
+				if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
+					slog.Warn("edit message failed", "err", err, "tgChatID", tgChatID)
+					return
+				}
+			}
+		case config.EndPolicyDelete:
+			{
+				if err := tg.DeleteMessage(ctx, tgChatID, state.messageID); err != nil {
+					slog.Warn("delete message failed", "err", err, "tgChatID", tgChatID)
+					return
+				}
 			}
 
-			if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
-				slog.Warn("edit message failed", "err", err, "tgChatID", tgChatID)
-				return
-			}
 		}
 
 		state.isLive = false
@@ -116,7 +128,6 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 	default:
 		// no transition — do nothing
-		slog.Info("OFFLINE")
 	}
 }
 
@@ -149,6 +160,8 @@ func main() {
 	ticker := time.NewTicker(cfg.Poll.Interval)
 
 	defer ticker.Stop()
+
+	slog.Info("Starting poll", "channel", cfg.Twitch.ChannelName)
 
 	poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, &state, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 
