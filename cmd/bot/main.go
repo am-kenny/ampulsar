@@ -36,10 +36,6 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 	switch {
 	case stream != nil && !state.isLive:
 		// WENT LIVE
-		// build message.StreamEvent from stream + userID
-		// message.FormatLive(...)
-		// tg.SendMessage(...) -> capture messageID
-		// update state: isLive=true, streamID=stream.ID, messageID=...
 
 		slog.Info("NOW LIVE")
 
@@ -70,10 +66,6 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 	case stream == nil && state.isLive:
 		// WENT OFFLINE
-		// tc.FetchStreamArchiveByUserIdAndStreamID(ctx, userID, state.streamID)
-		// build message.StreamEvent (offline), formatted with or without RecordingURL
-		// tg.SendMessage(...)
-		// reset state: isLive=false, streamID="", messageID=0
 
 		slog.Info("NOW OFFLINE")
 
@@ -83,7 +75,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			}
 		}
 
-		if onEnd != config.EndPolicyNone {
+		if onEnd == config.EndPolicyEditInPlace || onEnd == config.EndPolicyNewMessage {
 			recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, state.streamID)
 			if err != nil {
 				slog.Warn("fetch stream archive failed", "err", err, "streamID", state.streamID)
@@ -110,7 +102,21 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 				}
 
 				if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
-					slog.Warn("edit message failed", "err", err, "tgChatID", tgChatID)
+					slog.Warn("message edit failed", "err", err, "tgChatID", tgChatID)
+					return
+				}
+			}
+		case config.EndPolicyNewMessage:
+			{
+				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
+				if err != nil {
+					slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
+					return
+				}
+
+				_, err = tg.SendHTMLMessage(ctx, tgChatID, text)
+				if err != nil {
+					slog.Warn("message send failed", "err", err, "tgChatID", tgChatID)
 					return
 				}
 			}
