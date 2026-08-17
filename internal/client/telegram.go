@@ -83,7 +83,7 @@ type TelegramClient struct {
 func NewTelegramClient(botToken string) *TelegramClient {
 	return &TelegramClient{
 		botToken:   botToken,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
