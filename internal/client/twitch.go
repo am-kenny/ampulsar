@@ -153,7 +153,7 @@ func (tc *TwitchClient) invalidateToken(stale string) {
 	}
 }
 
-func (tc *TwitchClient) callGetHelix(ctx context.Context, path string, params url.Values, result any) error {
+func (tc *TwitchClient) callGetHelix[T any](ctx context.Context, path string, params url.Values, result *twitchResponse[T]) error {
 	const maxAttempts = 2
 
 	var err error
@@ -172,7 +172,7 @@ func (tc *TwitchClient) callGetHelix(ctx context.Context, path string, params ur
 		}
 
 		var apiErr *TwitchAPIError
-		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized {
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
 			return err
 		}
 
@@ -183,7 +183,7 @@ func (tc *TwitchClient) callGetHelix(ctx context.Context, path string, params ur
 	return fmt.Errorf("after %d attempts: %w", maxAttempts, err)
 }
 
-func (tc *TwitchClient) doGetHelix(ctx context.Context, token, path string, params url.Values, result any) error {
+func (tc *TwitchClient) doGetHelix[T any](ctx context.Context, token, path string, params url.Values, result *twitchResponse[T]) error {
 	fullPath := "/helix/" + path
 
 	u := url.URL{
@@ -279,13 +279,13 @@ func (tc *TwitchClient) FetchStreamArchiveByUserIdAndStreamID(ctx context.Contex
 
 // TwitchAPIError is a non-2xx response from the Twitch API.
 type TwitchAPIError struct {
-	Status int
-	Path   string
-	Body   string
+	StatusCode int
+	Path       string
+	Body       string
 }
 
 func (e *TwitchAPIError) Error() string {
-	s := fmt.Sprintf("twitch %s: %d %s", e.Path, e.Status, http.StatusText(e.Status))
+	s := fmt.Sprintf("twitch %s: %d %s", e.Path, e.StatusCode, http.StatusText(e.StatusCode))
 	if e.Body != "" {
 		s += ": " + e.Body
 	}
@@ -297,8 +297,8 @@ func (e *TwitchAPIError) Error() string {
 func newTwitchAPIError(resp *http.Response, path string) *TwitchAPIError {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
 	return &TwitchAPIError{
-		Status: resp.StatusCode,
-		Path:   path,
-		Body:   string(bytes.TrimSpace(b)),
+		StatusCode: resp.StatusCode,
+		Path:       path,
+		Body:       string(bytes.TrimSpace(b)),
 	}
 }
