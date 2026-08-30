@@ -44,13 +44,13 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 		text, err := message.FormatLive(templateStyle, templateLanguage, streamEvent)
 		if err != nil {
-			slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
+			slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
 			return
 		}
 
 		messageID, err := tg.SendHTMLMessage(ctx, tgChatID, text)
 		if err != nil {
-			slog.Warn("message send failed", "err", err, "tgChatID", tgChatID)
+			slog.Warn("message send failed", "err", err, "tg_chat_id", tgChatID)
 			return
 		}
 
@@ -60,7 +60,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 		if shouldPin {
 			if err := tg.PinChatMessage(ctx, tgChatID, messageID); err != nil {
-				slog.Warn("pin message failed", "err", err, "tgChatID", tgChatID)
+				slog.Warn("pin message failed", "err", err, "tg_chat_id", tgChatID)
 			}
 		}
 
@@ -71,14 +71,14 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 		if shouldPin {
 			if err := tg.UnpinChatMessage(ctx, tgChatID, state.messageID); err != nil {
-				slog.Warn("unpin message failed", "err", err, "tgChatID", tgChatID)
+				slog.Warn("unpin message failed", "err", err, "tg_chat_id", tgChatID)
 			}
 		}
 
 		if onEnd == config.EndPolicyEditInPlace || onEnd == config.EndPolicyNewMessage {
 			recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, state.streamID)
 			if err != nil {
-				slog.Warn("fetch stream archive failed", "err", err, "streamID", state.streamID)
+				slog.Warn("fetch stream archive failed", "err", err, "stream_id", state.streamID)
 				return
 			}
 
@@ -97,12 +97,12 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
 				if err != nil {
-					slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
+					slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
 					return
 				}
 
 				if err := tg.EditHTMLMessageText(ctx, tgChatID, state.messageID, text); err != nil {
-					slog.Warn("message edit failed", "err", err, "tgChatID", tgChatID)
+					slog.Warn("message edit failed", "err", err, "tg_chat_id", tgChatID)
 					return
 				}
 			}
@@ -110,20 +110,20 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			{
 				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
 				if err != nil {
-					slog.Warn("message formatting failed", "err", err, "streamEvent", streamEvent)
+					slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
 					return
 				}
 
 				_, err = tg.SendHTMLMessage(ctx, tgChatID, text)
 				if err != nil {
-					slog.Warn("message send failed", "err", err, "tgChatID", tgChatID)
+					slog.Warn("message send failed", "err", err, "tg_chat_id", tgChatID)
 					return
 				}
 			}
 		case config.EndPolicyDelete:
 			{
 				if err := tg.DeleteMessage(ctx, tgChatID, state.messageID); err != nil {
-					slog.Warn("delete message failed", "err", err, "tgChatID", tgChatID)
+					slog.Warn("delete message failed", "err", err, "tg_chat_id", tgChatID)
 					return
 				}
 			}
@@ -182,5 +182,4 @@ func main() {
 			poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, &state, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 		}
 	}
-
 }
