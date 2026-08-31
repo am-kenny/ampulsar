@@ -32,8 +32,8 @@ type UserData struct {
 	ID              string `json:"id"`
 	Login           string `json:"login"`
 	DisplayName     string `json:"display_name"`
-	ProfileImageUrl string `json:"profile_image_url"`
-	OfflineImageUrl string `json:"offline_image_url"`
+	ProfileImageURL string `json:"profile_image_url"`
+	OfflineImageURL string `json:"offline_image_url"`
 	CreatedAt       string `json:"created_at"`
 }
 
