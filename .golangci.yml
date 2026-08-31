@@ -1,0 +1,38 @@
+version: "2"
+
+linters:
+  enable:
+    # Defaults
+    - errcheck      # Errcheck is a program for checking for unchecked errors in Go code. These unchecked errors can be critical bugs in some cases.
+    - govet         # Vet examines Go source code and reports suspicious constructs. It is roughly the same as 'go vet' and uses its passes. [auto-fix]
+    - ineffassign   # Detects when assignments to existing variables are not used. [fast]
+    - staticcheck   # It's the set of rules from staticcheck. [auto-fix]
+    - unused        # Checks Go code for unused constants, variables, functions and types.
+    # Extras
+    - errorlint     # Find code that can cause problems with the error wrapping scheme introduced in Go 1.13. [auto-fix]
+    - sloglint      # Ensures consistent code style when using log/slog. [auto-fix]
+    - bodyclose     # Checks whether HTTP response body is closed successfully.
+    - contextcheck  # Check whether the function uses a non-inherited context.
+    - unconvert     # Remove unnecessary type conversions.
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+    sloglint:
+      no-mixed-args: true
+      key-naming-case: snake
+
+formatters:
+  enable:
+    - gofumpt # Enforce a stricter format than gofmt, while being backwards compatible.
+    - goimports # Checks if the code and import statements are formatted according to the 'goimports' command.
+    
+
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/am-kenny/ampulsar
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
