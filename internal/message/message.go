@@ -5,16 +5,12 @@ import (
 	"fmt"
 	"html/template"
 	"strings"
+
+	"github.com/am-kenny/ampulsar/internal/domain"
 )
 
 type StreamEvent struct {
-	DisplayName string
-	Username    string
-	Title       string
-	Game        string
-
-	RecordingURL string
-	Duration     string
+	domain.Session
 
 	Timestamp int64
 }
