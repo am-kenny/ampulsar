@@ -12,14 +12,17 @@ import (
 	"github.com/am-kenny/ampulsar/internal/config"
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/message"
+	"github.com/am-kenny/ampulsar/internal/store"
 )
 
-func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, session *domain.Session, shouldPin bool, onEnd config.EndPolicy, templateStyle, templateLanguage string) *domain.Session {
+func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, sessionStore *store.Store, shouldPin bool, onEnd config.EndPolicy, templateStyle, templateLanguage string) {
 	stream, err := tc.FetchStreamByUsername(ctx, user.Login)
 	if err != nil {
 		slog.Error("fetch stream failed", "err", err, "channel", user.Login)
-		return session
+		return
 	}
+
+	session := sessionStore.GetSession()
 
 	switch {
 	case stream != nil && session == nil:
@@ -44,13 +47,13 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 		text, err := message.FormatLive(templateStyle, templateLanguage, streamEvent)
 		if err != nil {
 			slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
-			return session
+			return
 		}
 
 		messageID, err := tg.SendHTMLMessage(ctx, tgChatID, text)
 		if err != nil {
 			slog.Warn("message send failed", "err", err, "tg_chat_id", tgChatID)
-			return session
+			return
 		}
 
 		session.LiveMessageID = messageID
@@ -60,6 +63,8 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 				slog.Warn("pin message failed", "err", err, "tg_chat_id", tgChatID)
 			}
 		}
+
+		sessionStore.SetSession(*session)
 
 	case stream == nil && session != nil:
 		// WENT OFFLINE
@@ -76,7 +81,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, session.StreamID)
 			if err != nil {
 				slog.Warn("fetch stream archive failed", "err", err, "stream_id", session.StreamID)
-				return session
+				return
 			}
 
 			if recording != nil {
@@ -84,7 +89,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 				session.Recording.Duration = recording.Duration
 				session.Title = recording.Title
 			} else {
-				return session
+				return
 			}
 		}
 
@@ -96,12 +101,12 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
 				if err != nil {
 					slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
-					return session
+					return
 				}
 
 				if err := tg.EditHTMLMessageText(ctx, tgChatID, session.LiveMessageID, text); err != nil {
 					slog.Warn("message edit failed", "err", err, "tg_chat_id", tgChatID)
-					return session
+					return
 				}
 			}
 		case config.EndPolicyNewMessage:
@@ -110,31 +115,30 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
 				if err != nil {
 					slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
-					return session
+					return
 				}
 
 				_, err = tg.SendHTMLMessage(ctx, tgChatID, text)
 				if err != nil {
 					slog.Warn("message send failed", "err", err, "tg_chat_id", tgChatID)
-					return session
+					return
 				}
 			}
 		case config.EndPolicyDelete:
 			{
 				if err := tg.DeleteMessage(ctx, tgChatID, session.LiveMessageID); err != nil {
 					slog.Warn("delete message failed", "err", err, "tg_chat_id", tgChatID)
-					return session
+					return
 				}
 			}
 
 		}
 
-		session = nil
+		sessionStore.DeleteSession()
 
 	default:
 		// no transition — do nothing
 	}
-	return session
 }
 
 func main() {
@@ -161,7 +165,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var session *domain.Session
+	st := &store.Store{}
 
 	ticker := time.NewTicker(cfg.Poll.Interval)
 
@@ -169,7 +173,7 @@ func main() {
 
 	slog.Info("Starting poll", "channel", cfg.Twitch.ChannelName)
 
-	session = poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, session, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
+	poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 
 	for {
 		select {
@@ -177,7 +181,7 @@ func main() {
 			slog.Info("Shutting down")
 			return
 		case <-ticker.C:
-			session = poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, session, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
+			poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 		}
 	}
 }
