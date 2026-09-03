@@ -9,6 +9,7 @@ import (
 type Store struct {
 	mu      sync.RWMutex
 	session *domain.Session
+	flush   func() error // nil => no persistence
 }
 
 func (s *Store) GetSession() *domain.Session {
@@ -23,16 +24,25 @@ func (s *Store) GetSession() *domain.Session {
 	return &cp
 }
 
-func (s *Store) SetSession(session domain.Session) {
+func (s *Store) SetSession(session domain.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.session = &session
+	return s.persist()
 }
 
-func (s *Store) DeleteSession() {
+func (s *Store) DeleteSession() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.session = nil
+	return s.persist()
+}
+
+func (s *Store) persist() error {
+	if s.flush != nil {
+		return s.flush()
+	}
+	return nil
 }

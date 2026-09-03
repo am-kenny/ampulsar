@@ -64,7 +64,9 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			}
 		}
 
-		sessionStore.SetSession(*session)
+		if err = sessionStore.SetSession(*session); err != nil {
+			slog.Warn("set session failed", "err", err)
+		}
 
 	case stream == nil && session != nil:
 		// WENT OFFLINE
@@ -134,7 +136,9 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 
 		}
 
-		sessionStore.DeleteSession()
+		if err = sessionStore.DeleteSession(); err != nil {
+			slog.Warn("delete session failed", "err", err)
+		}
 
 	default:
 		// no transition — do nothing
