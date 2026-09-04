@@ -169,7 +169,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	st := &store.Store{}
+	storePath := "./ampulsar.json"
+
+	st, err := store.NewFile(storePath)
+	if err != nil {
+		slog.Error("file store init failed", "err", err, "store_path", storePath)
+		os.Exit(1)
+	}
+	slog.Info("File store loaded successfully", "has_session", st.GetSession() != nil)
 
 	ticker := time.NewTicker(cfg.Poll.Interval)
 
