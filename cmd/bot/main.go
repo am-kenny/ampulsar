@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/adrg/xdg"
+
 	"github.com/am-kenny/ampulsar/internal/client"
 	"github.com/am-kenny/ampulsar/internal/config"
 	"github.com/am-kenny/ampulsar/internal/domain"
@@ -169,14 +171,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	storePath := "./ampulsar.json"
+	storePath, err := xdg.StateFile("ampulsar/session.json")
+	if err != nil {
+		slog.Error("state directory init failed", "err", err, "path", storePath)
+		os.Exit(1)
+	}
 
 	st, err := store.NewFile(storePath)
 	if err != nil {
-		slog.Error("file store init failed", "err", err, "store_path", storePath)
+		slog.Error("file store init failed", "err", err, "path", storePath)
 		os.Exit(1)
 	}
-	slog.Info("File store loaded successfully", "has_session", st.GetSession() != nil)
+	slog.Info("File store loaded successfully", "path", storePath, "has_session", st.GetSession() != nil)
 
 	ticker := time.NewTicker(cfg.Poll.Interval)
 
