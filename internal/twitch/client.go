@@ -1,4 +1,4 @@
-package client
+package twitch
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	twitchAuthHost = "id.twitch.tv"
-	twitchAPIHost  = "api.twitch.tv"
+	authHost = "id.twitch.tv"
+	apiHost  = "api.twitch.tv"
 )
 
 type tokenResponse struct {
@@ -56,8 +56,8 @@ type videoData struct {
 	Duration     string `json:"duration"`
 }
 
-// TwitchClient is safe for concurrent use.
-type TwitchClient struct {
+// Client is safe for concurrent use.
+type Client struct {
 	clientID     string
 	clientSecret string
 
@@ -68,8 +68,8 @@ type TwitchClient struct {
 	httpClient *http.Client
 }
 
-func NewTwitchClient(clientID, clientSecret string) *TwitchClient {
-	return &TwitchClient{
+func NewClient(clientID, clientSecret string) *Client {
+	return &Client{
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
@@ -78,12 +78,12 @@ func NewTwitchClient(clientID, clientSecret string) *TwitchClient {
 
 // fetchToken performs the token request and touches no client state.
 // It is called with tc.mu held, so it must not take the lock itself.
-func (tc *TwitchClient) fetchToken(ctx context.Context) (tokenResponse, error) {
+func (tc *Client) fetchToken(ctx context.Context) (tokenResponse, error) {
 	const path = "/oauth2/token"
 
 	authURL := url.URL{
 		Scheme: "https",
-		Host:   twitchAuthHost,
+		Host:   authHost,
 		Path:   path,
 	}
 
@@ -107,7 +107,7 @@ func (tc *TwitchClient) fetchToken(ctx context.Context) (tokenResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return tokenResponse{}, newTwitchAPIError(resp, path)
+		return tokenResponse{}, newAPIError(resp, path)
 	}
 
 	var tr tokenResponse
@@ -122,7 +122,7 @@ func (tc *TwitchClient) fetchToken(ctx context.Context) (tokenResponse, error) {
 	return tr, nil
 }
 
-func (tc *TwitchClient) ensureToken(ctx context.Context) (string, error) {
+func (tc *Client) ensureToken(ctx context.Context) (string, error) {
 	const tokenRefreshBuffer = time.Minute * 5
 
 	tc.mu.Lock()
@@ -144,7 +144,7 @@ func (tc *TwitchClient) ensureToken(ctx context.Context) (string, error) {
 // invalidateToken clears the cached token only if it is still the one that
 // failed. A concurrent goroutine may already have fetched a replacement, and
 // discarding that would cause an unnecessary token request.
-func (tc *TwitchClient) invalidateToken(stale string) {
+func (tc *Client) invalidateToken(stale string) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -153,7 +153,7 @@ func (tc *TwitchClient) invalidateToken(stale string) {
 	}
 }
 
-func (tc *TwitchClient) callGetHelix[T any](ctx context.Context, path string, params url.Values, result *twitchResponse[T]) error {
+func (tc *Client) callGetHelix[T any](ctx context.Context, path string, params url.Values, result *twitchResponse[T]) error {
 	const maxAttempts = 2
 
 	var err error
@@ -171,7 +171,7 @@ func (tc *TwitchClient) callGetHelix[T any](ctx context.Context, path string, pa
 			return nil
 		}
 
-		var apiErr *TwitchAPIError
+		var apiErr *APIError
 		if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusUnauthorized {
 			return err
 		}
@@ -183,12 +183,12 @@ func (tc *TwitchClient) callGetHelix[T any](ctx context.Context, path string, pa
 	return fmt.Errorf("after %d attempts: %w", maxAttempts, err)
 }
 
-func (tc *TwitchClient) doGetHelix[T any](ctx context.Context, token, path string, params url.Values, result *twitchResponse[T]) error {
+func (tc *Client) doGetHelix[T any](ctx context.Context, token, path string, params url.Values, result *twitchResponse[T]) error {
 	fullPath := "/helix/" + path
 
 	u := url.URL{
 		Scheme:   "https",
-		Host:     twitchAPIHost,
+		Host:     apiHost,
 		Path:     fullPath,
 		RawQuery: params.Encode(),
 	}
@@ -209,7 +209,7 @@ func (tc *TwitchClient) doGetHelix[T any](ctx context.Context, token, path strin
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return newTwitchAPIError(resp, fullPath)
+		return newAPIError(resp, fullPath)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
@@ -219,7 +219,7 @@ func (tc *TwitchClient) doGetHelix[T any](ctx context.Context, token, path strin
 	return nil
 }
 
-func (tc *TwitchClient) FetchUserByUsername(ctx context.Context, username string) (*UserData, error) {
+func (tc *Client) FetchUserByUsername(ctx context.Context, username string) (*UserData, error) {
 	params := url.Values{}
 	params.Set("login", username)
 
@@ -236,7 +236,7 @@ func (tc *TwitchClient) FetchUserByUsername(ctx context.Context, username string
 	return &resp.Data[0], nil
 }
 
-func (tc *TwitchClient) FetchStreamByUsername(ctx context.Context, username string) (*streamData, error) {
+func (tc *Client) FetchStreamByUsername(ctx context.Context, username string) (*streamData, error) {
 	params := url.Values{}
 	params.Add("user_login", username)
 
@@ -253,7 +253,7 @@ func (tc *TwitchClient) FetchStreamByUsername(ctx context.Context, username stri
 	return &resp.Data[0], nil
 }
 
-func (tc *TwitchClient) FetchStreamArchiveByUserIdAndStreamID(ctx context.Context, userID, streamID string) (*videoData, error) {
+func (tc *Client) FetchStreamArchiveByUserIdAndStreamID(ctx context.Context, userID, streamID string) (*videoData, error) {
 	params := url.Values{}
 	params.Set("user_id", userID)
 	params.Set("type", "archive")
@@ -277,14 +277,14 @@ func (tc *TwitchClient) FetchStreamArchiveByUserIdAndStreamID(ctx context.Contex
 	return nil, nil
 }
 
-// TwitchAPIError is a non-2xx response from the Twitch API.
-type TwitchAPIError struct {
+// APIError is a non-2xx response from the Twitch API.
+type APIError struct {
 	StatusCode int
 	Path       string
 	Body       string
 }
 
-func (e *TwitchAPIError) Error() string {
+func (e *APIError) Error() string {
 	s := fmt.Sprintf("twitch %s: %d %s", e.Path, e.StatusCode, http.StatusText(e.StatusCode))
 	if e.Body != "" {
 		s += ": " + e.Body
@@ -292,11 +292,11 @@ func (e *TwitchAPIError) Error() string {
 	return s
 }
 
-// newTwitchAPIError builds an error from a non-2xx response, reading a bounded
+// newAPIError builds an error from a non-2xx response, reading a bounded
 // prefix of the body for context.
-func newTwitchAPIError(resp *http.Response, path string) *TwitchAPIError {
+func newAPIError(resp *http.Response, path string) *APIError {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
-	return &TwitchAPIError{
+	return &APIError{
 		StatusCode: resp.StatusCode,
 		Path:       path,
 		Body:       string(bytes.TrimSpace(b)),

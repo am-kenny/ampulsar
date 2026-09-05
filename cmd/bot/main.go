@@ -15,9 +15,10 @@ import (
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/store"
+	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
-func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
+func poll(ctx context.Context, tc *twitch.Client, tg *client.TelegramClient, tgChatID string, user *twitch.UserData, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
 	stream, err := tc.FetchStreamByUsername(ctx, user.Login)
 	if err != nil {
 		slog.Error("fetch stream failed", "err", err, "channel", user.Login)
@@ -162,7 +163,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	twitchClient := client.NewTwitchClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)
+	twitchClient := twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)
 	telegramClient := client.NewTelegramClient(cfg.Telegram.BotToken)
 
 	user, err := twitchClient.FetchUserByUsername(ctx, cfg.Twitch.ChannelName)
