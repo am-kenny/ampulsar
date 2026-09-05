@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/am-kenny/ampulsar/internal/domain"
 )
 
 type fieldSpec struct {
@@ -31,23 +33,6 @@ func loadFields(specs []fieldSpec) error {
 	return nil
 }
 
-type EndPolicy string
-
-const (
-	EndPolicyEditInPlace EndPolicy = "edit_in_place"
-	EndPolicyNewMessage  EndPolicy = "new_message"
-	EndPolicyDelete      EndPolicy = "delete"
-	EndPolicyNone        EndPolicy = "none"
-)
-
-func (p EndPolicy) Valid() bool {
-	switch p {
-	case EndPolicyEditInPlace, EndPolicyNewMessage, EndPolicyDelete, EndPolicyNone:
-		return true
-	}
-	return false
-}
-
 type TwitchConfig struct {
 	ClientID     string
 	ClientSecret string
@@ -72,7 +57,7 @@ type TelegramConfig struct {
 	BotToken     string
 	ChatID       string
 	EditOnChange bool
-	OnEnd        EndPolicy
+	OnEnd        domain.EndPolicy
 	Pin          bool
 }
 
@@ -93,7 +78,7 @@ func (cnf *TelegramConfig) Active() bool {
 }
 
 func (cnf *TelegramConfig) defaults() {
-	cnf.OnEnd = EndPolicyEditInPlace
+	cnf.OnEnd = domain.EndPolicyEditInPlace
 	// EditOnChange and Pin default to false on init
 }
 
@@ -233,9 +218,9 @@ func parseDuration(dst *time.Duration) func(string) error {
 	}
 }
 
-func parseEndPolicy(dst *EndPolicy) func(string) error {
+func parseEndPolicy(dst *domain.EndPolicy) func(string) error {
 	return func(v string) error {
-		p := EndPolicy(v)
+		p := domain.EndPolicy(v)
 		if !p.Valid() {
 			return fmt.Errorf("want edit_in_place, new_message, delete or none, got %q", v)
 		}

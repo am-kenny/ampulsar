@@ -81,7 +81,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 			}
 		}
 
-		if onEnd == config.EndPolicyEditInPlace || onEnd == config.EndPolicyNewMessage {
+		if onEnd == domain.EndPolicyEditInPlace || onEnd == domain.EndPolicyNewMessage {
 			recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, session.StreamID)
 			if err != nil {
 				slog.Warn("fetch stream archive failed", "err", err, "stream_id", session.StreamID)
@@ -98,7 +98,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 		}
 
 		switch onEnd {
-		case config.EndPolicyEditInPlace:
+		case domain.EndPolicyEditInPlace:
 			{
 
 				streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
@@ -113,7 +113,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 					return
 				}
 			}
-		case config.EndPolicyNewMessage:
+		case domain.EndPolicyNewMessage:
 			{
 				streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
 				text, err := message.FormatWentOffline(templateStyle, templateLanguage, streamEvent)
@@ -128,7 +128,7 @@ func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClien
 					return
 				}
 			}
-		case config.EndPolicyDelete:
+		case domain.EndPolicyDelete:
 			{
 				if err := tg.DeleteMessage(ctx, tgChatID, session.LiveMessageID); err != nil {
 					slog.Warn("delete message failed", "err", err, "tg_chat_id", tgChatID)
