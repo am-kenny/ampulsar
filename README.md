@@ -1,2 +1,2 @@
 # ampulsar
-Bot to publish live Twitch and YouTube stream notification to Telegram and Discord
+Bot to publish live Twitch stream notification to Telegram
