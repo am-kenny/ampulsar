@@ -1,4 +1,4 @@
-package client
+package telegram
 
 import (
 	"bytes"
@@ -75,20 +75,20 @@ type forChannelsRequest struct {
 	ForChannels bool `json:"for_channels"`
 }
 
-type TelegramClient struct {
+type Client struct {
 	botToken   string
 	httpClient *http.Client
 }
 
-func NewTelegramClient(botToken string) *TelegramClient {
-	return &TelegramClient{
+func NewClient(botToken string) *Client {
+	return &Client{
 		botToken:   botToken,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
-// callTelegram performs a Telegram API call with method POST and JSON body
-func (tc *TelegramClient) callTelegram[T any](ctx context.Context, method string, body any, result *telegramResponse[T]) error {
+// call performs a Telegram API call with method POST and JSON body
+func (tc *Client) call[T any](ctx context.Context, method string, body any, result *telegramResponse[T]) error {
 	u := url.URL{
 		Scheme: "https",
 		Host:   "api.telegram.org",
@@ -132,7 +132,7 @@ func (tc *TelegramClient) callTelegram[T any](ctx context.Context, method string
 	}
 
 	if resp.StatusCode != http.StatusOK || !result.OK {
-		return &TelegramAPIError{
+		return &APIError{
 			Method:      method,
 			StatusCode:  resp.StatusCode,
 			Description: result.Description,
@@ -144,17 +144,17 @@ func (tc *TelegramClient) callTelegram[T any](ctx context.Context, method string
 	return nil
 }
 
-func (tc *TelegramClient) GetMe(ctx context.Context) (User, error) {
+func (tc *Client) GetMe(ctx context.Context) (User, error) {
 	var resp telegramResponse[User]
 
-	if err := tc.callTelegram(ctx, "getMe", nil, &resp); err != nil {
+	if err := tc.call(ctx, "getMe", nil, &resp); err != nil {
 		return User{}, err
 	}
 
 	return resp.Result, nil
 }
 
-func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string, parseMode ParseMode) (int, error) {
+func (tc *Client) SendMessage(ctx context.Context, chatID, text string, parseMode ParseMode) (int, error) {
 	body := sendMessageRequest{
 		ChatID:    chatID,
 		Text:      text,
@@ -163,84 +163,84 @@ func (tc *TelegramClient) SendMessage(ctx context.Context, chatID, text string, 
 
 	var resp telegramResponse[message]
 
-	if err := tc.callTelegram(ctx, "sendMessage", body, &resp); err != nil {
+	if err := tc.call(ctx, "sendMessage", body, &resp); err != nil {
 		return 0, err
 	}
 
 	return resp.Result.MessageID, nil
 }
 
-func (tc *TelegramClient) SendHTMLMessage(ctx context.Context, chatID, text string) (int, error) {
+func (tc *Client) SendHTMLMessage(ctx context.Context, chatID, text string) (int, error) {
 	return tc.SendMessage(ctx, chatID, text, ParseHTML)
 }
 
-func (tc *TelegramClient) EditMessageText(ctx context.Context, chatID string, messageId int, text string, parseMode ParseMode) error {
+func (tc *Client) EditMessageText(ctx context.Context, chatID string, messageID int, text string, parseMode ParseMode) error {
 	body := editMessageTextRequest{
 		ChatID:    chatID,
-		MessageID: messageId,
+		MessageID: messageID,
 		Text:      text,
 		ParseMode: parseMode,
 	}
 
 	var resp telegramResponse[message]
 
-	if err := tc.callTelegram(ctx, "editMessageText", body, &resp); err != nil {
+	if err := tc.call(ctx, "editMessageText", body, &resp); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tc *TelegramClient) EditHTMLMessageText(ctx context.Context, chatID string, messageId int, text string) error {
-	return tc.EditMessageText(ctx, chatID, messageId, text, ParseHTML)
+func (tc *Client) EditHTMLMessageText(ctx context.Context, chatID string, messageID int, text string) error {
+	return tc.EditMessageText(ctx, chatID, messageID, text, ParseHTML)
 }
 
-func (tc *TelegramClient) DeleteMessage(ctx context.Context, chatID string, messageId int) error {
+func (tc *Client) DeleteMessage(ctx context.Context, chatID string, messageID int) error {
 	body := chatMessageRequest{
 		ChatID:    chatID,
-		MessageID: messageId,
+		MessageID: messageID,
 	}
 
 	var resp telegramResponse[bool]
 
-	if err := tc.callTelegram(ctx, "deleteMessage", body, &resp); err != nil {
+	if err := tc.call(ctx, "deleteMessage", body, &resp); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tc *TelegramClient) PinChatMessage(ctx context.Context, chatID string, messageId int) error {
+func (tc *Client) PinChatMessage(ctx context.Context, chatID string, messageID int) error {
 	body := chatMessageRequest{
 		ChatID:    chatID,
-		MessageID: messageId,
+		MessageID: messageID,
 	}
 
 	var resp telegramResponse[bool]
 
-	if err := tc.callTelegram(ctx, "pinChatMessage", body, &resp); err != nil {
+	if err := tc.call(ctx, "pinChatMessage", body, &resp); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tc *TelegramClient) UnpinChatMessage(ctx context.Context, chatID string, messageId int) error {
+func (tc *Client) UnpinChatMessage(ctx context.Context, chatID string, messageID int) error {
 	body := chatMessageRequest{
 		ChatID:    chatID,
-		MessageID: messageId,
+		MessageID: messageID,
 	}
 
 	var resp telegramResponse[bool]
 
-	if err := tc.callTelegram(ctx, "unpinChatMessage", body, &resp); err != nil {
+	if err := tc.call(ctx, "unpinChatMessage", body, &resp); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tc *TelegramClient) SetMyDefaultAdministratorRights(ctx context.Context, rights ChatAdministratorRights, forChannels bool) error {
+func (tc *Client) SetMyDefaultAdministratorRights(ctx context.Context, rights ChatAdministratorRights, forChannels bool) error {
 	body := setRightsRequest{
 		Rights:      rights,
 		ForChannels: forChannels,
@@ -248,28 +248,28 @@ func (tc *TelegramClient) SetMyDefaultAdministratorRights(ctx context.Context, r
 
 	var resp telegramResponse[bool]
 
-	if err := tc.callTelegram(ctx, "setMyDefaultAdministratorRights", body, &resp); err != nil {
+	if err := tc.call(ctx, "setMyDefaultAdministratorRights", body, &resp); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (tc *TelegramClient) GetMyDefaultAdministratorRights(ctx context.Context, forChannels bool) (ChatAdministratorRights, error) {
+func (tc *Client) GetMyDefaultAdministratorRights(ctx context.Context, forChannels bool) (ChatAdministratorRights, error) {
 	body := forChannelsRequest{
 		ForChannels: forChannels,
 	}
 
 	var resp telegramResponse[ChatAdministratorRights]
 
-	if err := tc.callTelegram(ctx, "getMyDefaultAdministratorRights", body, &resp); err != nil {
+	if err := tc.call(ctx, "getMyDefaultAdministratorRights", body, &resp); err != nil {
 		return ChatAdministratorRights{}, err
 	}
 
 	return resp.Result, nil
 }
 
-type TelegramAPIError struct {
+type APIError struct {
 	Method      string
 	StatusCode  int
 	Description string
@@ -277,7 +277,7 @@ type TelegramAPIError struct {
 	parameters  *responseParameters
 }
 
-func (e *TelegramAPIError) Error() string {
+func (e *APIError) Error() string {
 	s := fmt.Sprintf("telegram %s: %d ", e.Method, e.StatusCode)
 	if e.Description != "" {
 		s += e.Description
@@ -290,14 +290,14 @@ func (e *TelegramAPIError) Error() string {
 	return s
 }
 
-func (e *TelegramAPIError) RetryAfter() time.Duration {
+func (e *APIError) RetryAfter() time.Duration {
 	if e.parameters != nil && e.parameters.RetryAfter > 0 {
 		return time.Duration(e.parameters.RetryAfter) * time.Second
 	}
 	return 0
 }
 
-func (e *TelegramAPIError) MigrateToChatID() int64 {
+func (e *APIError) MigrateToChatID() int64 {
 	if e.parameters != nil {
 		return e.parameters.MigrateToChatID
 	}

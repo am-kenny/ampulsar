@@ -10,15 +10,15 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/am-kenny/ampulsar/internal/client"
 	"github.com/am-kenny/ampulsar/internal/config"
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/store"
+	"github.com/am-kenny/ampulsar/internal/telegram"
 	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
-func poll(ctx context.Context, tc *twitch.Client, tg *client.TelegramClient, tgChatID string, user *twitch.UserData, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
+func poll(ctx context.Context, tc *twitch.Client, tg *telegram.Client, tgChatID string, user *twitch.UserData, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
 	stream, err := tc.FetchStreamByUsername(ctx, user.Login)
 	if err != nil {
 		slog.Error("fetch stream failed", "err", err, "channel", user.Login)
@@ -164,7 +164,7 @@ func main() {
 	defer stop()
 
 	twitchClient := twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)
-	telegramClient := client.NewTelegramClient(cfg.Telegram.BotToken)
+	telegramClient := telegram.NewClient(cfg.Telegram.BotToken)
 
 	user, err := twitchClient.FetchUserByUsername(ctx, cfg.Twitch.ChannelName)
 	if err != nil {
