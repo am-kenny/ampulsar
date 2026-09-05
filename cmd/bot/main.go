@@ -171,10 +171,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	storePath, err := xdg.StateFile("ampulsar/session.json")
-	if err != nil {
-		slog.Error("state directory init failed", "err", err, "path", storePath)
-		os.Exit(1)
+	storePath := cfg.Store.Path
+	if storePath == "" {
+		storePath, err = xdg.StateFile("ampulsar/session.json")
+		if err != nil {
+			slog.Error("state directory init failed", "err", err, "path", storePath)
+			os.Exit(1)
+		}
 	}
 
 	st, err := store.NewFile(storePath)

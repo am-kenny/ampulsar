@@ -136,13 +136,23 @@ type PollConfig struct {
 	Interval time.Duration
 }
 
+func (cnf *PollConfig) fields() []fieldSpec {
+	return []fieldSpec{
+		{"POLL_INTERVAL", parseDuration(&cnf.Interval), false},
+	}
+}
+
 func (cnf *PollConfig) defaults() {
 	cnf.Interval = 5 * time.Minute
 }
 
-func (cnf *PollConfig) fields() []fieldSpec {
+type StoreConfig struct {
+	Path string
+}
+
+func (cnf *StoreConfig) fields() []fieldSpec {
 	return []fieldSpec{
-		{"POLL_INTERVAL", parseDuration(&cnf.Interval), false},
+		{"STORE_PATH", parseString(&cnf.Path), false},
 	}
 }
 
@@ -152,6 +162,7 @@ type Config struct {
 	Discord  DiscordConfig
 	Template TemplateConfig
 	Poll     PollConfig
+	Store    StoreConfig
 }
 
 func (cfg *Config) validate() error {
@@ -160,6 +171,37 @@ func (cfg *Config) validate() error {
 	}
 
 	return nil
+}
+
+// Load reads configuration from environment variables, validates it
+// and returns a populated Config or an error.
+func Load() (*Config, error) {
+	cfg := &Config{}
+
+	cfg.Telegram.defaults()
+	cfg.Template.defaults()
+	cfg.Poll.defaults()
+
+	groups := [][]fieldSpec{
+		cfg.Twitch.fields(),
+		cfg.Telegram.fields(),
+		cfg.Discord.fields(),
+		cfg.Template.fields(),
+		cfg.Poll.fields(),
+		cfg.Store.fields(),
+	}
+
+	for _, specs := range groups {
+		if err := loadFields(specs); err != nil {
+			return nil, fmt.Errorf("failed to load fields: %w", err)
+		}
+	}
+
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 func parseString(dst *string) func(string) error {
@@ -200,34 +242,4 @@ func parseEndPolicy(dst *EndPolicy) func(string) error {
 		*dst = p
 		return nil
 	}
-}
-
-// Load reads configuration from environment variables, validates it
-// and returns a populated Config or an error.
-func Load() (*Config, error) {
-	cfg := &Config{}
-
-	cfg.Telegram.defaults()
-	cfg.Template.defaults()
-	cfg.Poll.defaults()
-
-	groups := [][]fieldSpec{
-		cfg.Twitch.fields(),
-		cfg.Telegram.fields(),
-		cfg.Discord.fields(),
-		cfg.Template.fields(),
-		cfg.Poll.fields(),
-	}
-
-	for _, specs := range groups {
-		if err := loadFields(specs); err != nil {
-			return nil, fmt.Errorf("failed to load fields: %w", err)
-		}
-	}
-
-	if err := cfg.validate(); err != nil {
-		return nil, err
-	}
-
-	return cfg, nil
 }
