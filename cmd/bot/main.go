@@ -17,7 +17,7 @@ import (
 	"github.com/am-kenny/ampulsar/internal/store"
 )
 
-func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, sessionStore *store.Store, shouldPin bool, onEnd config.EndPolicy, templateStyle, templateLanguage string) {
+func poll(ctx context.Context, tc *client.TwitchClient, tg *client.TelegramClient, tgChatID string, user *client.UserData, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
 	stream, err := tc.FetchStreamByUsername(ctx, user.Login)
 	if err != nil {
 		slog.Error("fetch stream failed", "err", err, "channel", user.Login)
