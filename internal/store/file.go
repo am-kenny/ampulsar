@@ -12,8 +12,10 @@ import (
 	"github.com/am-kenny/ampulsar/internal/domain"
 )
 
-const storeFileMode = 0o600
-const storeDirMode = 0o700
+const (
+	storeFileMode = 0o600
+	storeDirMode  = 0o700
+)
 
 func NewFile(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "" {
