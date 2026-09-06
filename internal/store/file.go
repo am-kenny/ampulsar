@@ -5,15 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/google/renameio/v2/maybe"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
 )
 
-const storeFileMode = 0o600
+const (
+	storeFileMode = 0o600
+	storeDirMode  = 0o700
+)
 
 func NewFile(path string) (*Store, error) {
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, storeDirMode); err != nil {
+			return nil, fmt.Errorf("store: cannot create dir %s: %w", dir, err)
+		}
+	}
+
 	s := &Store{}
 
 	b, err := os.ReadFile(path)

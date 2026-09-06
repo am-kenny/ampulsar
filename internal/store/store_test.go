@@ -124,6 +124,25 @@ func TestFileNewFileUnwritableFails(t *testing.T) {
 	}
 }
 
+func TestFileCreatesMissingParentDir(t *testing.T) {
+	// A path several levels deep, none of which exist yet
+	path := filepath.Join(t.TempDir(), "a", "b", "c", "session.json")
+
+	s := mustNewFile(t, path)
+
+	want := domain.Session{StreamID: "s1", Title: "Factorio"}
+	if err := s.SetSession(want); err != nil {
+		t.Fatalf("SetSession into created dir: %v", err)
+	}
+
+	// Reopen from the same path to confirm persistence
+	s2 := mustNewFile(t, path)
+	got := s2.GetSession()
+	if got == nil || got.StreamID != "s1" {
+		t.Fatalf("nested path did not persist: got %+v", got)
+	}
+}
+
 // mustSet stores session and fails the test if that errors
 func mustSetSession(t *testing.T, s *store.Store, session domain.Session) {
 	t.Helper()
