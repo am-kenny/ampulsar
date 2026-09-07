@@ -13,6 +13,6 @@ type Session struct {
 }
 
 type Recording struct {
-	URL string
-	Duration     string
+	URL      string
+	Duration string
 }
