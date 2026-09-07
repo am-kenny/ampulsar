@@ -90,7 +90,7 @@ func poll(ctx context.Context, tc *twitch.Client, tg *telegram.Client, tgChatID 
 			}
 
 			if recording != nil {
-				session.Recording.RecordingURL = recording.URL
+				session.Recording.URL = recording.URL
 				session.Recording.Duration = recording.Duration
 				session.Title = recording.Title
 			} else {

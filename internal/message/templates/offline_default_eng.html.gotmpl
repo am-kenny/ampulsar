@@ -1,3 +1,3 @@
-⚫ Stream ended: {{if .Title }}{{ trimRedDot .Title}}{{else}}{{.DisplayName}}{{end}}{{if .Duration}} ({{.Duration}}){{end}}
+⚫ Stream ended: {{if .Title }}{{ trimRedDot .Title}}{{else}}{{.DisplayName}}{{end}}{{if .Recording.Duration}} ({{.Duration}}){{end}}
 
-{{if .RecordingURL}}📼 <a href="{{.RecordingURL}}">Watch the recording</a>{{else}}No recording available.{{end}}
+{{if .Recording.URL}}📼 <a href="{{.Recording.URL}}">Watch the recording</a>{{else}}No recording available.{{end}}
