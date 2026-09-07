@@ -18,31 +18,26 @@ import (
 	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
-func poll(ctx context.Context, tc *twitch.Client, tg *telegram.Client, tgChatID string, user *twitch.UserData, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
-	stream, err := tc.FetchStreamByUsername(ctx, user.Login)
+func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID string, channel *domain.Channel, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
+	snapshot, err := ts.FetchStream(ctx, channel.Username)
 	if err != nil {
-		slog.Error("fetch stream failed", "err", err, "channel", user.Login)
+		slog.Error("fetch stream failed", "err", err, "channel", channel.Username)
 		return
 	}
 
 	session := sessionStore.GetSession()
 
 	switch {
-	case stream != nil && session == nil:
+	case snapshot != nil && session == nil:
 		// WENT LIVE
 
 		slog.Info("NOW LIVE")
 
 		session = &domain.Session{
-			Channel: domain.Channel{
-				Platform:    domain.Twitch,
-				ChannelID:   user.ID,
-				Username:    user.Login,
-				DisplayName: user.DisplayName,
-			},
-			StreamID: stream.ID,
-			Title:    stream.Title,
-			Game:     stream.GameName,
+			Channel:  *channel,
+			StreamID: snapshot.StreamID,
+			Title:    snapshot.Title,
+			Game:     snapshot.Game,
 		}
 
 		streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
@@ -71,7 +66,7 @@ func poll(ctx context.Context, tc *twitch.Client, tg *telegram.Client, tgChatID 
 			slog.Warn("set session failed", "err", err)
 		}
 
-	case stream == nil && session != nil:
+	case snapshot == nil && session != nil:
 		// WENT OFFLINE
 
 		slog.Info("NOW OFFLINE")
@@ -83,16 +78,14 @@ func poll(ctx context.Context, tc *twitch.Client, tg *telegram.Client, tgChatID 
 		}
 
 		if onEnd == domain.EndPolicyEditInPlace || onEnd == domain.EndPolicyNewMessage {
-			recording, err := tc.FetchStreamArchiveByUserIdAndStreamID(ctx, user.ID, session.StreamID)
+			recording, err := ts.FetchRecording(ctx, channel.ID, session.StreamID)
 			if err != nil {
 				slog.Warn("fetch stream archive failed", "err", err, "stream_id", session.StreamID)
 				return
 			}
 
 			if recording != nil {
-				session.Recording.URL = recording.URL
-				session.Recording.Duration = recording.Duration
-				session.Title = recording.Title
+				session.Recording = *recording
 			} else {
 				return
 			}
@@ -166,7 +159,9 @@ func main() {
 	twitchClient := twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)
 	telegramClient := telegram.NewClient(cfg.Telegram.BotToken)
 
-	user, err := twitchClient.FetchUserByUsername(ctx, cfg.Twitch.ChannelName)
+	twitchSource := twitch.NewSource(twitchClient)
+
+	channel, err := twitchSource.ResolveChannel(ctx, cfg.Twitch.ChannelName)
 	if err != nil {
 		slog.Error("fetch twitch channel failed", "err", err, "channel", cfg.Twitch.ChannelName)
 		os.Exit(1)
@@ -192,9 +187,9 @@ func main() {
 
 	defer ticker.Stop()
 
-	slog.Info("Starting poll", "channel", cfg.Twitch.ChannelName)
+	slog.Info("Starting poll", "channel", channel.Username)
 
-	poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
+	poll(ctx, twitchSource, telegramClient, cfg.Telegram.ChatID, channel, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 
 	for {
 		select {
@@ -202,7 +197,7 @@ func main() {
 			slog.Info("Shutting down")
 			return
 		case <-ticker.C:
-			poll(ctx, twitchClient, telegramClient, cfg.Telegram.ChatID, user, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
+			poll(ctx, twitchSource, telegramClient, cfg.Telegram.ChatID, channel, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 		}
 	}
 }

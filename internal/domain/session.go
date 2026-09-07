@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type Session struct {
 	Channel
 
@@ -14,5 +16,6 @@ type Session struct {
 
 type Recording struct {
 	URL      string
-	Duration string
+	Title    string
+	Duration time.Duration
 }

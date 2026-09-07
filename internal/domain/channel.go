@@ -2,7 +2,7 @@ package domain
 
 type Channel struct {
 	Platform
-	ChannelID   string
+	ID          string
 	Username    string
 	DisplayName string
 }

@@ -42,8 +42,8 @@ type streamData struct {
 	GameName     string `json:"game_name"`
 	Title        string `json:"title"`
 	ViewerCount  int    `json:"viewer_count"`
-	StartedAt    string `json:"started_at"`
-	ThumbnailURL string `json:"thumbnail_url"`
+	StartedAt    string `json:"started_at"`    // The UTC date and time (in RFC3339 format) of when the broadcast began
+	ThumbnailURL string `json:"thumbnail_url"` // A URL to an image of a frame from the last 5 minutes of the stream.
 }
 
 type videoData struct {
@@ -52,8 +52,8 @@ type videoData struct {
 	Title        string `json:"title"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
-	Type         string `json:"type"`
-	Duration     string `json:"duration"`
+	Type         string `json:"type"`     // The video's type. Possible values are: archive, highlight, upload
+	Duration     string `json:"duration"` // The video's length in ISO 8601 duration format.
 }
 
 // Client is safe for concurrent use.
