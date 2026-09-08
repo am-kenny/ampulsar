@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"strings"
+	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
 )
@@ -18,6 +19,13 @@ type StreamEvent struct {
 var funcMap = template.FuncMap{
 	"trimRedDot": func(s string) string {
 		return strings.TrimPrefix(s, "🔴")
+	},
+	"hms": func(d time.Duration) string {
+		total := int(d.Seconds())
+		h := total / 3600
+		m := (total % 3600) / 60
+		s := total % 60
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
 	},
 }
 
