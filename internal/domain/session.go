@@ -5,13 +5,18 @@ import "time"
 type Session struct {
 	Channel
 
-	StreamID      string
-	LiveMessageID int
+	StreamID    string
+	LiveMessage MessageRef
 
 	Title string
 	Game  string
 
 	Recording Recording
+}
+
+type MessageRef struct {
+	ID     string
+	ChatID string
 }
 
 type Recording struct {

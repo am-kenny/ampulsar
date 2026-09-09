@@ -20,7 +20,7 @@ func TestMemoryGetEmptyReturnsNil(t *testing.T) {
 
 func TestMemorySetGetRoundTrip(t *testing.T) {
 	var s store.Store
-	want := domain.Session{StreamID: "s1", LiveMessageID: 42, Title: "Factorio"}
+	want := domain.Session{StreamID: "s1", LiveMessage: domain.MessageRef{ID: "42", ChatID: "123"}, Title: "Factorio"}
 
 	if err := s.SetSession(want); err != nil {
 		t.Fatalf("SetSession: %v", err)
@@ -68,7 +68,7 @@ func TestFileRoundTripSurvivesReopen(t *testing.T) {
 
 	s1 := mustNewFile(t, path)
 
-	want := domain.Session{StreamID: "s1", LiveMessageID: 123, Title: "Factorio"}
+	want := domain.Session{StreamID: "s1", LiveMessage: domain.MessageRef{ID: "123", ChatID: "123"}, Title: "Factorio"}
 	if err := s1.SetSession(want); err != nil {
 		t.Fatalf("SetSession: %v", err)
 	}

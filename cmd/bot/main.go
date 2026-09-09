@@ -18,7 +18,7 @@ import (
 	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
-func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID string, channel *domain.Channel, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
+func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Sink, tgChatID string, channel *domain.Channel, sessionStore *store.Store, shouldPin bool, onEnd domain.EndPolicy, templateStyle, templateLanguage string) {
 	snapshot, err := ts.FetchStream(ctx, channel.Username)
 	if err != nil {
 		slog.Error("fetch stream failed", "err", err, "channel", channel.Username)
@@ -48,16 +48,16 @@ func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID 
 			return
 		}
 
-		messageID, err := tg.SendHTMLMessage(ctx, tgChatID, text)
+		messageRef, err := tg.Send(ctx, tgChatID, text)
 		if err != nil {
 			slog.Warn("message send failed", "err", err, "tg_chat_id", tgChatID)
 			return
 		}
 
-		session.LiveMessageID = messageID
+		session.LiveMessage = *messageRef
 
 		if shouldPin {
-			if err := tg.PinChatMessage(ctx, tgChatID, messageID); err != nil {
+			if err := tg.Pin(ctx, session.LiveMessage); err != nil {
 				slog.Warn("pin message failed", "err", err, "tg_chat_id", tgChatID)
 			}
 		}
@@ -72,7 +72,7 @@ func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID 
 		slog.Info("NOW OFFLINE")
 
 		if shouldPin {
-			if err := tg.UnpinChatMessage(ctx, tgChatID, session.LiveMessageID); err != nil {
+			if err := tg.Unpin(ctx, session.LiveMessage); err != nil {
 				slog.Warn("unpin message failed", "err", err, "tg_chat_id", tgChatID)
 			}
 		}
@@ -102,7 +102,7 @@ func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID 
 					return
 				}
 
-				if err := tg.EditHTMLMessageText(ctx, tgChatID, session.LiveMessageID, text); err != nil {
+				if err := tg.Edit(ctx, session.LiveMessage, text); err != nil {
 					slog.Warn("message edit failed", "err", err, "tg_chat_id", tgChatID)
 					return
 				}
@@ -116,7 +116,7 @@ func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID 
 					return
 				}
 
-				_, err = tg.SendHTMLMessage(ctx, tgChatID, text)
+				_, err = tg.Send(ctx, tgChatID, text)
 				if err != nil {
 					slog.Warn("message send failed", "err", err, "tg_chat_id", tgChatID)
 					return
@@ -124,7 +124,7 @@ func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Client, tgChatID 
 			}
 		case domain.EndPolicyDelete:
 			{
-				if err := tg.DeleteMessage(ctx, tgChatID, session.LiveMessageID); err != nil {
+				if err := tg.Delete(ctx, session.LiveMessage); err != nil {
 					slog.Warn("delete message failed", "err", err, "tg_chat_id", tgChatID)
 					return
 				}
@@ -157,9 +157,10 @@ func main() {
 	defer stop()
 
 	twitchClient := twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)
-	telegramClient := telegram.NewClient(cfg.Telegram.BotToken)
-
 	twitchSource := twitch.NewSource(twitchClient)
+
+	telegramClient := telegram.NewClient(cfg.Telegram.BotToken)
+	telegramSink := telegram.NewSink(telegramClient)
 
 	channel, err := twitchSource.ResolveChannel(ctx, cfg.Twitch.ChannelName)
 	if err != nil {
@@ -189,7 +190,7 @@ func main() {
 
 	slog.Info("Starting poll", "channel", channel.Username)
 
-	poll(ctx, twitchSource, telegramClient, cfg.Telegram.ChatID, channel, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
+	poll(ctx, twitchSource, telegramSink, cfg.Telegram.ChatID, channel, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 
 	for {
 		select {
@@ -197,7 +198,7 @@ func main() {
 			slog.Info("Shutting down")
 			return
 		case <-ticker.C:
-			poll(ctx, twitchSource, telegramClient, cfg.Telegram.ChatID, channel, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
+			poll(ctx, twitchSource, telegramSink, cfg.Telegram.ChatID, channel, st, cfg.Telegram.Pin, cfg.Telegram.OnEnd, cfg.Template.Style, cfg.Template.Language)
 		}
 	}
 }
