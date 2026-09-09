@@ -16,52 +16,61 @@ func NewSink(client *Client) *Sink {
 	return &Sink{client: client}
 }
 
-func (s *Sink) Send(ctx context.Context, chatID, text string) (*domain.MessageRef, error) {
+func (s *Sink) Send(ctx context.Context, chatID, text string) (domain.MessageRef, error) {
 	id, err := s.client.SendHTMLMessage(ctx, chatID, text)
 	if err != nil {
-		return nil, err
+		return domain.MessageRef{}, err
 	}
 
 	strID := strconv.Itoa(id)
 
-	return &domain.MessageRef{
+	return domain.MessageRef{
 		ID:     strID,
 		ChatID: chatID,
 	}, nil
 }
 
 func (s *Sink) Edit(ctx context.Context, ref domain.MessageRef, text string) error {
-	id, err := strconv.Atoi(ref.ID)
+	id, err := parseID(ref)
 	if err != nil {
-		return fmt.Errorf("sink: failed to parse message id %s: %w", ref.ID, err)
+		return err
 	}
 
 	return s.client.EditHTMLMessageText(ctx, ref.ChatID, id, text)
 }
 
 func (s *Sink) Delete(ctx context.Context, ref domain.MessageRef) error {
-	id, err := strconv.Atoi(ref.ID)
+	id, err := parseID(ref)
 	if err != nil {
-		return fmt.Errorf("sink: failed to parse message id %s: %w", ref.ID, err)
+		return err
 	}
 
 	return s.client.DeleteMessage(ctx, ref.ChatID, id)
 }
 
 func (s *Sink) Pin(ctx context.Context, ref domain.MessageRef) error {
-	id, err := strconv.Atoi(ref.ID)
+	id, err := parseID(ref)
 	if err != nil {
-		return fmt.Errorf("sink: failed to parse message id %s: %w", ref.ID, err)
+		return err
 	}
 
 	return s.client.PinChatMessage(ctx, ref.ChatID, id)
 }
 
 func (s *Sink) Unpin(ctx context.Context, ref domain.MessageRef) error {
-	id, err := strconv.Atoi(ref.ID)
+	id, err := parseID(ref)
 	if err != nil {
-		return fmt.Errorf("sink: failed to parse message id %s: %w", ref.ID, err)
+		return err
 	}
 
 	return s.client.UnpinChatMessage(ctx, ref.ChatID, id)
+}
+
+func parseID(ref domain.MessageRef) (int, error) {
+	id, err := strconv.Atoi(ref.ID)
+	if err != nil {
+		return 0, fmt.Errorf("sink: failed to parse message id %s: %w", ref.ID, err)
+	}
+
+	return id, nil
 }

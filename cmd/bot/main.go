@@ -54,7 +54,7 @@ func poll(ctx context.Context, ts *twitch.Source, tg *telegram.Sink, tgChatID st
 			return
 		}
 
-		session.LiveMessage = *messageRef
+		session.LiveMessage = messageRef
 
 		if shouldPin {
 			if err := tg.Pin(ctx, session.LiveMessage); err != nil {
