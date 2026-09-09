@@ -49,7 +49,6 @@ func (s *Sink) Delete(ctx context.Context, ref domain.MessageRef) error {
 }
 
 func (s *Sink) Pin(ctx context.Context, ref domain.MessageRef) error {
-
 	id, err := strconv.Atoi(ref.ID)
 	if err != nil {
 		return fmt.Errorf("sink: failed to parse message id %s: %w", ref.ID, err)
