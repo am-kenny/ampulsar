@@ -55,8 +55,6 @@ func NewPoller(source Source, sink Sink, store Store, channel domain.Channel, co
 }
 
 func (p *Poller) Poll(ctx context.Context) {
-	cfg := p.config
-
 	snapshot, err := p.source.FetchStream(ctx, p.channel.Username)
 	if err != nil {
 		slog.Error("fetch stream failed", "err", err, "channel", p.channel.Username)
@@ -68,103 +66,112 @@ func (p *Poller) Poll(ctx context.Context) {
 	switch {
 	case snapshot != nil && session == nil:
 		// WENT LIVE
-		slog.Info("NOW LIVE")
+		p.processOnline(ctx, snapshot)
 
-		session = &domain.Session{
-			Channel:  p.channel,
-			StreamID: snapshot.StreamID,
-			Title:    snapshot.Title,
-			Game:     snapshot.Game,
+	case snapshot == nil && session != nil:
+		// WENT OFFLINE
+		p.processOffline(ctx, session)
+
+	default:
+		// no transition — do nothing
+	}
+}
+
+func (p *Poller) processOnline(ctx context.Context, snapshot *domain.Snapshot) {
+	slog.Info("NOW LIVE")
+
+	cfg := p.config
+
+	session := &domain.Session{
+		Channel:  p.channel,
+		StreamID: snapshot.StreamID,
+		Title:    snapshot.Title,
+		Game:     snapshot.Game,
+	}
+
+	streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
+
+	text, err := message.FormatLive(cfg.Style, cfg.Lang, streamEvent)
+	if err != nil {
+		slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
+		return
+	}
+
+	messageRef, err := p.sink.Send(ctx, cfg.ChatID, text)
+	if err != nil {
+		slog.Warn("message send failed", "err", err, "chat_id", cfg.ChatID)
+		return
+	}
+
+	session.LiveMessage = messageRef
+
+	if cfg.Pin {
+		if err := p.sink.Pin(ctx, session.LiveMessage); err != nil {
+			slog.Warn("pin message failed", "err", err, "chat_id", cfg.ChatID)
+		}
+	}
+
+	if err = p.store.SetSession(*session); err != nil {
+		slog.Warn("set session failed", "err", err)
+	}
+}
+
+func (p *Poller) processOffline(ctx context.Context, session *domain.Session) {
+	slog.Info("NOW OFFLINE")
+
+	cfg := p.config
+
+	if cfg.Pin {
+		if err := p.sink.Unpin(ctx, session.LiveMessage); err != nil {
+			slog.Warn("unpin message failed", "err", err, "chat_id", cfg.ChatID)
+		}
+	}
+
+	var offlineText string
+	if cfg.OnEnd == domain.EndPolicyEditInPlace || cfg.OnEnd == domain.EndPolicyNewMessage {
+		recording, err := p.source.FetchRecording(ctx, p.channel.ID, session.StreamID)
+		if err != nil {
+			slog.Warn("fetch stream archive failed", "err", err, "stream_id", session.StreamID)
+			return
 		}
 
-		streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
+		if recording == nil {
+			return
+		}
+		session.Recording = *recording
 
-		text, err := message.FormatLive(cfg.Style, cfg.Lang, streamEvent)
+		streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
+		offlineText, err = message.FormatWentOffline(cfg.Style, cfg.Lang, streamEvent)
 		if err != nil {
 			slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
 			return
 		}
+	}
 
-		messageRef, err := p.sink.Send(ctx, cfg.ChatID, text)
+	switch cfg.OnEnd {
+	case domain.EndPolicyEditInPlace:
+		if err := p.sink.Edit(ctx, session.LiveMessage, offlineText); err != nil {
+			slog.Warn("message edit failed", "err", err, "chat_id", cfg.ChatID)
+			return
+		}
+
+	case domain.EndPolicyNewMessage:
+		_, err := p.sink.Send(ctx, cfg.ChatID, offlineText)
 		if err != nil {
 			slog.Warn("message send failed", "err", err, "chat_id", cfg.ChatID)
 			return
 		}
 
-		session.LiveMessage = messageRef
-
-		if cfg.Pin {
-			if err := p.sink.Pin(ctx, session.LiveMessage); err != nil {
-				slog.Warn("pin message failed", "err", err, "chat_id", cfg.ChatID)
-			}
+	case domain.EndPolicyDelete:
+		if err := p.sink.Delete(ctx, session.LiveMessage); err != nil {
+			slog.Warn("delete message failed", "err", err, "chat_id", cfg.ChatID)
+			return
 		}
+	case domain.EndPolicyNone:
+		// No extra actions
+	}
 
-		if err = p.store.SetSession(*session); err != nil {
-			slog.Warn("set session failed", "err", err)
-		}
-
-	case snapshot == nil && session != nil:
-		// WENT OFFLINE
-		slog.Info("NOW OFFLINE")
-
-		if cfg.Pin {
-			if err := p.sink.Unpin(ctx, session.LiveMessage); err != nil {
-				slog.Warn("unpin message failed", "err", err, "chat_id", cfg.ChatID)
-			}
-		}
-
-		var offlineText string
-		if cfg.OnEnd == domain.EndPolicyEditInPlace || cfg.OnEnd == domain.EndPolicyNewMessage {
-			recording, err := p.source.FetchRecording(ctx, p.channel.ID, session.StreamID)
-			if err != nil {
-				slog.Warn("fetch stream archive failed", "err", err, "stream_id", session.StreamID)
-				return
-			}
-
-			if recording == nil {
-				return
-			}
-			session.Recording = *recording
-
-			streamEvent := message.StreamEvent{Session: *session, Timestamp: time.Now().Unix()}
-			offlineText, err = message.FormatWentOffline(cfg.Style, cfg.Lang, streamEvent)
-			if err != nil {
-				slog.Warn("message formatting failed", "err", err, "stream_event", streamEvent)
-				return
-			}
-		}
-
-		switch cfg.OnEnd {
-		case domain.EndPolicyEditInPlace:
-			{
-				if err := p.sink.Edit(ctx, session.LiveMessage, offlineText); err != nil {
-					slog.Warn("message edit failed", "err", err, "chat_id", cfg.ChatID)
-					return
-				}
-			}
-		case domain.EndPolicyNewMessage:
-			{
-				_, err = p.sink.Send(ctx, cfg.ChatID, offlineText)
-				if err != nil {
-					slog.Warn("message send failed", "err", err, "chat_id", cfg.ChatID)
-					return
-				}
-			}
-		case domain.EndPolicyDelete:
-			{
-				if err := p.sink.Delete(ctx, session.LiveMessage); err != nil {
-					slog.Warn("delete message failed", "err", err, "chat_id", cfg.ChatID)
-					return
-				}
-			}
-
-		}
-
-		if err = p.store.DeleteSession(); err != nil {
-			slog.Warn("delete session failed", "err", err)
-		}
-
-	default:
-		// no transition — do nothing
+	if err := p.store.DeleteSession(); err != nil {
+		slog.Warn("delete session failed", "err", err)
 	}
 }
