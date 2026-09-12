@@ -77,23 +77,37 @@ type forChannelsRequest struct {
 
 type Client struct {
 	botToken   string
+	baseURL    string
 	httpClient *http.Client
 }
 
-func NewClient(botToken string) *Client {
-	return &Client{
+func NewClient(botToken string, opts ...Option) *Client {
+	c := &Client{
 		botToken:   botToken,
+		baseURL:    "https://api.telegram.org",
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c
+}
+
+type Option func(*Client)
+
+func WithBaseURL(u string) Option {
+	return func(c *Client) { c.baseURL = u }
 }
 
 // call performs a Telegram API call with method POST and JSON body
 func (tc *Client) call[T any](ctx context.Context, method string, body any, result *telegramResponse[T]) error {
-	u := url.URL{
-		Scheme: "https",
-		Host:   "api.telegram.org",
-		Path:   "/bot" + tc.botToken + "/" + method,
+	u, err := url.Parse(tc.baseURL)
+	if err != nil {
+		return fmt.Errorf("telegram %s: invalid base url %q: %w", method, tc.baseURL, err)
 	}
+	u.Path = "/bot" + tc.botToken + "/" + method
 
 	var reqBody io.Reader
 	if body != nil {
