@@ -50,6 +50,7 @@ jobs:
         run: go test --race ./...
 
   docker:
+    name: Docker
     runs-on: ubuntu-latest
     permissions:
       contents: read
