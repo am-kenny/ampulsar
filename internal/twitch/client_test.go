@@ -13,9 +13,11 @@ import (
 	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
-const token = "test_token"
-const okToken = `{"access_token":"` + token + `","expires_in":3600}`
-const emptyData = `{"data":[]}`
+const (
+	token     = "test_token"
+	okToken   = `{"access_token":"` + token + `","expires_in":3600}`
+	emptyData = `{"data":[]}`
+)
 
 // helix serves a fixed token response, then the given body for the Helix call.
 // It mirrors telegram's newClient: one call in, assert the result out.
