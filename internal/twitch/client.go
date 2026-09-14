@@ -64,6 +64,7 @@ type Client struct {
 	tokenExpiration time.Time
 	now             func() time.Time // function to retrieve current time
 
+	timeout    time.Duration
 	httpClient *http.Client
 }
 
@@ -74,12 +75,14 @@ func NewClient(clientID, clientSecret string, opts ...Option) *Client {
 		authURL:      "https://id.twitch.tv",
 		apiURL:       "https://api.twitch.tv",
 		now:          time.Now,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		timeout:      10 * time.Second,
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
+
+	c.httpClient = &http.Client{Timeout: c.timeout}
 
 	return c
 }
@@ -96,6 +99,10 @@ func WithAPIURL(u string) Option {
 
 func WithClock(now func() time.Time) Option {
 	return func(c *Client) { c.now = now }
+}
+
+func WithTimeout(d time.Duration) Option {
+	return func(c *Client) { c.timeout = d }
 }
 
 // fetchToken performs the token request and touches no client state.
