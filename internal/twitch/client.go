@@ -14,11 +14,6 @@ import (
 	"time"
 )
 
-const (
-	authHost = "id.twitch.tv"
-	apiHost  = "api.twitch.tv"
-)
-
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
@@ -61,19 +56,46 @@ type Client struct {
 	clientID     string
 	clientSecret string
 
+	authURL string
+	apiURL  string
+
 	mu              sync.Mutex
 	token           string
 	tokenExpiration time.Time
+	now             func() time.Time // function to retrieve current time
 
 	httpClient *http.Client
 }
 
-func NewClient(clientID, clientSecret string) *Client {
-	return &Client{
+func NewClient(clientID, clientSecret string, opts ...Option) *Client {
+	c := &Client{
 		clientID:     clientID,
 		clientSecret: clientSecret,
+		authURL:      "https://id.twitch.tv",
+		apiURL:       "https://api.twitch.tv",
+		now:          time.Now,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c
+}
+
+type Option func(*Client)
+
+func WithAuthURL(u string) Option {
+	return func(c *Client) { c.authURL = u }
+}
+
+func WithAPIURL(u string) Option {
+	return func(c *Client) { c.apiURL = u }
+}
+
+func WithClock(now func() time.Time) Option {
+	return func(c *Client) { c.now = now }
 }
 
 // fetchToken performs the token request and touches no client state.
@@ -81,11 +103,11 @@ func NewClient(clientID, clientSecret string) *Client {
 func (tc *Client) fetchToken(ctx context.Context) (tokenResponse, error) {
 	const path = "/oauth2/token"
 
-	authURL := url.URL{
-		Scheme: "https",
-		Host:   authHost,
-		Path:   path,
+	authURL, err := url.Parse(tc.authURL)
+	if err != nil {
+		return tokenResponse{}, fmt.Errorf("twitch auth: invalid auth url %q: %w", tc.authURL, err)
 	}
+	authURL.Path = path
 
 	form := url.Values{}
 	form.Set("client_id", tc.clientID)
@@ -128,14 +150,14 @@ func (tc *Client) ensureToken(ctx context.Context) (string, error) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
-	if tc.token == "" || time.Now().After(tc.tokenExpiration.Add(-1*tokenRefreshBuffer)) {
+	if tc.token == "" || tc.now().After(tc.tokenExpiration.Add(-1*tokenRefreshBuffer)) {
 		tr, err := tc.fetchToken(ctx)
 		if err != nil {
 			return "", fmt.Errorf("failed to fetch token: %w", err)
 		}
 
 		tc.token = tr.AccessToken
-		tc.tokenExpiration = time.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)
+		tc.tokenExpiration = tc.now().Add(time.Duration(tr.ExpiresIn) * time.Second)
 	}
 
 	return tc.token, nil
@@ -186,12 +208,12 @@ func (tc *Client) callGetHelix[T any](ctx context.Context, path string, params u
 func (tc *Client) doGetHelix[T any](ctx context.Context, token, path string, params url.Values, result *twitchResponse[T]) error {
 	fullPath := "/helix/" + path
 
-	u := url.URL{
-		Scheme:   "https",
-		Host:     apiHost,
-		Path:     fullPath,
-		RawQuery: params.Encode(),
+	u, err := url.Parse(tc.apiURL)
+	if err != nil {
+		return fmt.Errorf("twitch %s: invalid url %q: %w", fullPath, tc.apiURL, err)
 	}
+	u.Path = fullPath
+	u.RawQuery = params.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
