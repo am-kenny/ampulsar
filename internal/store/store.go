@@ -31,19 +31,26 @@ func (s *Store) GetSession() *domain.Session {
 	return &cp
 }
 
+// SetSession sets provided session in store and deletes deliveries if session has a new ID
 func (s *Store) SetSession(session domain.Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if s.session != nil && s.session.StreamID != session.StreamID {
+		s.deliveries = nil
+	}
 
 	s.session = &session
 	return s.persist()
 }
 
+// DeleteSession deletes session and deliveries from store
 func (s *Store) DeleteSession() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.session = nil
+	s.deliveries = nil
 	return s.persist()
 }
 
