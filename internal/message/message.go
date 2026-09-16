@@ -34,19 +34,34 @@ var templateFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.gotmpl"))
 
+// render looks up template by type, style, language and executes it against event
 func render(messageType, style, lang string, e StreamEvent) (string, error) {
 	name := fmt.Sprintf("%s_%s_%s.html.gotmpl", messageType, style, lang)
 
 	t := templates.Lookup(name)
 	if t == nil {
-		return "", fmt.Errorf("no template found for %s", name)
+		return "", fmt.Errorf("message: no template found for %s", name)
 	}
 
+	return execute(t, e)
+}
+
+// Render parses templateText and executes it against event
+func Render(templateText string, e StreamEvent) (string, error) {
+	t, err := template.New("").Funcs(funcMap).Parse(templateText)
+	if err != nil {
+		return "", fmt.Errorf("message: parse template: %w", err)
+	}
+
+	return execute(t, e)
+}
+
+// execute executes provided template against event
+func execute(t *template.Template, e StreamEvent) (string, error) {
 	var buf strings.Builder
 	if err := t.Execute(&buf, e); err != nil {
-		return "", err
+		return "", fmt.Errorf("message: execute template: %w", err)
 	}
-
 	return buf.String(), nil
 }
 
