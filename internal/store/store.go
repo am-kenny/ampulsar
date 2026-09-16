@@ -1,15 +1,22 @@
 package store
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
 )
 
+var (
+	ErrNoSession     = errors.New("store: no session")
+	ErrStaleDelivery = errors.New("store: delivery does not belong to the current session")
+)
+
 type Store struct {
-	mu      sync.RWMutex
-	session *domain.Session
-	flush   func() error // nil => no persistence
+	mu         sync.RWMutex
+	session    *domain.Session
+	deliveries []domain.Delivery
+	flush      func() error // nil => no persistence
 }
 
 func (s *Store) GetSession() *domain.Session {
@@ -37,6 +44,41 @@ func (s *Store) DeleteSession() error {
 	defer s.mu.Unlock()
 
 	s.session = nil
+	return s.persist()
+}
+
+func (s *Store) GetDeliveries() []domain.Delivery {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.deliveries) == 0 {
+		return nil
+	}
+
+	cp := make([]domain.Delivery, len(s.deliveries))
+	copy(cp, s.deliveries)
+	return cp
+}
+
+func (s *Store) SaveDelivery(d domain.Delivery) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.session == nil {
+		return ErrNoSession
+	}
+	if d.StreamID != s.session.StreamID {
+		return ErrStaleDelivery
+	}
+
+	for i := range s.deliveries {
+		if s.deliveries[i].Kind == d.Kind {
+			s.deliveries[i] = d
+			return s.persist()
+		}
+	}
+
+	s.deliveries = append(s.deliveries, d)
 	return s.persist()
 }
 
