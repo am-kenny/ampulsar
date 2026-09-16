@@ -2,21 +2,27 @@ package domain
 
 import "time"
 
+type SessionState string
+
+const (
+	SessionLive     SessionState = "live"
+	SessionEnded    SessionState = "ended"
+	SessionArchived SessionState = "archived"
+	SessionClosed   SessionState = "closed"
+)
+
 type Session struct {
 	Channel
 
 	StreamID    string
+	State       SessionState
+	Version     int
 	LiveMessage MessageRef
 
 	Title string
 	Game  string
 
 	Recording Recording
-}
-
-type MessageRef struct {
-	ID     string
-	ChatID string
 }
 
 type Recording struct {
