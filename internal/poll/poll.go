@@ -81,21 +81,26 @@ func (p *Poller) Poll(ctx context.Context) {
 	switch {
 	case session == nil && snapshot != nil:
 		// went live
-		p.processOnline(ctx, snapshot)
+		p.startSession(ctx, snapshot)
 	case session == nil:
 		// offline and nothing to track
 	case session.State == domain.SessionLive && snapshot == nil:
 		// went offline
-		p.processOffline(ctx, session)
+		p.markEnded(ctx, session)
+		p.handleEnded(ctx, session)
 	case session.State == domain.SessionLive && session.StreamID != snapshot.StreamID:
 		// stream restarted between ticks
-		p.processOffline(ctx, session)
+		p.markEnded(ctx, session)
+		p.handleEnded(ctx, session)
 	case session.State == domain.SessionEnded:
-		p.processEnded(ctx, session)
+		// waiting for recording or retrying end-of-stream delivery
+		p.handleEnded(ctx, session)
+	default:
+		// still live with the same StreamID, nothing to do
 	}
 }
 
-func (p *Poller) processOnline(ctx context.Context, snapshot *domain.Snapshot) {
+func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 	slog.Info("poller: stream went live", "snapshot", snapshot)
 
 	cfg := p.config
@@ -135,7 +140,8 @@ func (p *Poller) processOnline(ctx context.Context, snapshot *domain.Snapshot) {
 	}
 }
 
-func (p *Poller) processOffline(ctx context.Context, session *domain.Session) {
+// markEnded unpins the live message if configured and records the session as ended
+func (p *Poller) markEnded(ctx context.Context, session *domain.Session) {
 	slog.Info("poller: stream went offline")
 
 	if p.config.Pin {
@@ -150,13 +156,11 @@ func (p *Poller) processOffline(ctx context.Context, session *domain.Session) {
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err)
 	}
-
-	p.processEnded(ctx, session)
 }
 
-// processEnded fetches recording if required by end policy and calls p.finalizeOrGiveUp
+// handleEnded fetches recording if required by end policy and calls p.finalizeOrGiveUp
 // this is the part that determines if grace threshold is reached
-func (p *Poller) processEnded(ctx context.Context, session *domain.Session) {
+func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 	slog.Debug("poller: ending session")
 
 	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
