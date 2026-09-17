@@ -5,21 +5,29 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/poll"
 )
 
 type fakeSource struct {
+	calls     []string
 	snapshot  *domain.Snapshot
 	recording *domain.Recording
 }
 
+func (f *fakeSource) record(method string) {
+	f.calls = append(f.calls, method)
+}
+
 func (f *fakeSource) FetchStream(_ context.Context, _ string) (*domain.Snapshot, error) {
+	f.record("FetchStream")
 	return f.snapshot, nil
 }
 
 func (f *fakeSource) FetchRecording(_ context.Context, _, _ string) (*domain.Recording, error) {
+	f.record("FetchRecording")
 	return f.recording, nil
 }
 
@@ -83,10 +91,13 @@ func (f *fakeStore) DeleteSession() error {
 	return nil
 }
 
+var testNow = time.Date(2026, 9, 17, 20, 0, 0, 0, time.UTC)
+
 func newPoller(src poll.Source, sink poll.Sink, st poll.Store, onEnd domain.EndPolicy, pin bool) *poll.Poller {
 	return poll.NewPoller(src, sink, st,
 		domain.Channel{Platform: domain.Twitch, ID: "u1", Username: "streamer"},
-		poll.Config{ChatID: "chat", Pin: pin, OnEnd: onEnd, Style: "default", Lang: "eng"},
+		poll.Config{ChatID: "chat", Pin: pin, OnEnd: onEnd, Style: "default", Lang: "eng", EndGrace: 10 * time.Minute},
+		poll.WithClock(func() time.Time { return testNow }),
 	)
 }
 
@@ -99,6 +110,7 @@ func liveSession() *domain.Session {
 		Platform: domain.Twitch, ID: "u1",
 		Username:    "streamer",
 		StreamID:    "s1",
+		State:       domain.SessionLive,
 		LiveMessage: domain.MessageRef{ID: "100", ChatID: "chat"},
 		Title:       "T",
 		Game:        "G",
@@ -115,80 +127,91 @@ func TestPoll(t *testing.T) {
 		pin       bool
 		sendFails bool
 
-		wantCalls  []string
-		wantStored bool
+		wantSourceCalls []string
+		wantSinkCalls   []string
+		wantStored      bool
 	}{
 		{
-			name:       "stays live",
-			snapshot:   liveSnapshot(),
-			starting:   liveSession(),
-			onEnd:      domain.EndPolicyEditInPlace,
-			wantStored: true,
+			name:            "stays live",
+			snapshot:        liveSnapshot(),
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+			wantStored:      true,
 		},
 		{
-			name:  "stays offline",
-			onEnd: domain.EndPolicyEditInPlace,
+			name:            "stays offline",
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
 		},
 		{
-			name:       "went live",
-			snapshot:   liveSnapshot(),
-			onEnd:      domain.EndPolicyEditInPlace,
-			wantCalls:  []string{"Send"},
-			wantStored: true,
+			name:            "went live",
+			snapshot:        liveSnapshot(),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+			wantSinkCalls:   []string{"Send"},
+			wantStored:      true,
 		},
 		{
-			name:       "went live with pin",
-			snapshot:   liveSnapshot(),
-			onEnd:      domain.EndPolicyEditInPlace,
-			pin:        true,
-			wantCalls:  []string{"Send", "Pin"},
-			wantStored: true,
+			name:            "went live with pin",
+			snapshot:        liveSnapshot(),
+			onEnd:           domain.EndPolicyEditInPlace,
+			pin:             true,
+			wantSourceCalls: []string{"FetchStream"},
+			wantSinkCalls:   []string{"Send", "Pin"},
+			wantStored:      true,
 		},
 		{
-			name:      "went live but send fails",
-			snapshot:  liveSnapshot(),
-			onEnd:     domain.EndPolicyEditInPlace,
-			sendFails: true,
-			wantCalls: []string{"Send"},
+			name:            "went live but send fails",
+			snapshot:        liveSnapshot(),
+			onEnd:           domain.EndPolicyEditInPlace,
+			sendFails:       true,
+			wantSourceCalls: []string{"FetchStream"},
+			wantSinkCalls:   []string{"Send"},
 		},
 		{
-			name:      "offline edit in place",
-			starting:  liveSession(),
-			recording: &domain.Recording{URL: "u"},
-			onEnd:     domain.EndPolicyEditInPlace,
-			wantCalls: []string{"Edit"},
+			name:            "offline edit in place",
+			starting:        liveSession(),
+			recording:       &domain.Recording{URL: "u"},
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Edit"},
 		},
 		{
-			name:      "offline new message",
-			starting:  liveSession(),
-			recording: &domain.Recording{URL: "u"},
-			onEnd:     domain.EndPolicyNewMessage,
-			wantCalls: []string{"Send"},
+			name:            "offline new message",
+			starting:        liveSession(),
+			recording:       &domain.Recording{URL: "u"},
+			onEnd:           domain.EndPolicyNewMessage,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Send"},
 		},
 		{
-			name:      "offline delete",
-			starting:  liveSession(),
-			onEnd:     domain.EndPolicyDelete,
-			wantCalls: []string{"Delete"},
+			name:            "offline delete",
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyDelete,
+			wantSourceCalls: []string{"FetchStream"},
+			wantSinkCalls:   []string{"Delete"},
 		},
 		{
-			name:     "offline none",
-			starting: liveSession(),
-			onEnd:    domain.EndPolicyNone,
+			name:            "offline none",
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyNone,
+			wantSourceCalls: []string{"FetchStream"},
 		},
 		{
-			name:      "offline delete with pin unpins first",
-			starting:  liveSession(),
-			onEnd:     domain.EndPolicyDelete,
-			pin:       true,
-			wantCalls: []string{"Unpin", "Delete"},
+			name:            "offline delete with pin unpins first",
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyDelete,
+			pin:             true,
+			wantSourceCalls: []string{"FetchStream"},
+			wantSinkCalls:   []string{"Unpin", "Delete"},
 		},
 		{
-			// No VOD yet: must not act or delete; retry next tick
-			name:       "offline no recording keeps session",
-			starting:   liveSession(),
-			onEnd:      domain.EndPolicyEditInPlace,
-			wantStored: true,
+			name:            "offline no recording keeps session",
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantStored:      true,
 		},
 	}
 
@@ -203,8 +226,11 @@ func TestPoll(t *testing.T) {
 
 			newPoller(src, sink, st, tt.onEnd, tt.pin).Poll(context.Background())
 
-			if !slices.Equal(sink.calls, tt.wantCalls) {
-				t.Errorf("calls = %v, want %v", sink.calls, tt.wantCalls)
+			if !slices.Equal(src.calls, tt.wantSourceCalls) {
+				t.Errorf("source calls = %v, want %v", src.calls, tt.wantSourceCalls)
+			}
+			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
+				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
 			}
 			if got := st.session != nil; got != tt.wantStored {
 				t.Errorf("session stored = %v, want %v", got, tt.wantStored)
