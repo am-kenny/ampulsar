@@ -39,8 +39,8 @@ type TwitchConfig struct {
 	ChannelName  string
 }
 
-// returns list of fieldSpec, holding env definitions and
-// pointers into the TwitchConfig for env loading
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the TwitchConfig for env loading
 func (cnf *TwitchConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"TWITCH_CLIENT_ID", parseString(&cnf.ClientID), true},
@@ -53,6 +53,18 @@ func (cnf *TwitchConfig) Active() bool {
 	return cnf.ClientID != "" && cnf.ClientSecret != "" && cnf.ChannelName != ""
 }
 
+type TikTokConfig struct {
+	Username string
+}
+
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the TikTokConfig for env loading
+func (cnf *TikTokConfig) fields() []fieldSpec {
+	return []fieldSpec{
+		{"TIKTOK_USERNAME", parseString(&cnf.Username), false},
+	}
+}
+
 type TelegramConfig struct {
 	BotToken     string
 	ChatID       string
@@ -61,8 +73,8 @@ type TelegramConfig struct {
 	Pin          bool
 }
 
-// returns list of fieldSpec, holding env definitions and
-// pointers into the TelegramConfig for env loading
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the TelegramConfig for env loading
 func (cnf *TelegramConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"TELEGRAM_BOT_TOKEN", parseString(&cnf.BotToken), true},
@@ -87,8 +99,8 @@ type DiscordConfig struct {
 	ChannelID string
 }
 
-// returns list of fieldSpec, holding env definitions and
-// pointers into the DiscordConfig for env loading
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the DiscordConfig for env loading
 func (cnf *DiscordConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"DISCORD_BOT_TOKEN", parseString(&cnf.BotToken), false},
@@ -105,6 +117,8 @@ type TemplateConfig struct {
 	Language string
 }
 
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the TemplateConfig for env loading
 func (cnf *TemplateConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"TEMPLATE_STYLE", parseString(&cnf.Style), false},
@@ -121,6 +135,8 @@ type PollConfig struct {
 	Interval time.Duration
 }
 
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the PollConfig for env loading
 func (cnf *PollConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"POLL_INTERVAL", parseDuration(&cnf.Interval), false},
@@ -135,6 +151,8 @@ type StoreConfig struct {
 	Path string
 }
 
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the StoreConfig for env loading
 func (cnf *StoreConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"STORE_PATH", parseString(&cnf.Path), false},
@@ -143,6 +161,7 @@ func (cnf *StoreConfig) fields() []fieldSpec {
 
 type Config struct {
 	Twitch   TwitchConfig
+	TikTok   TikTokConfig
 	Telegram TelegramConfig
 	Discord  DiscordConfig
 	Template TemplateConfig
@@ -169,6 +188,7 @@ func Load() (*Config, error) {
 
 	groups := [][]fieldSpec{
 		cfg.Twitch.fields(),
+		cfg.TikTok.fields(),
 		cfg.Telegram.fields(),
 		cfg.Discord.fields(),
 		cfg.Template.fields(),
