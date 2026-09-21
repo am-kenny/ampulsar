@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -11,9 +13,11 @@ import (
 	"github.com/adrg/xdg"
 
 	"github.com/am-kenny/ampulsar/internal/config"
+	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/poll"
 	"github.com/am-kenny/ampulsar/internal/store"
 	"github.com/am-kenny/ampulsar/internal/telegram"
+	"github.com/am-kenny/ampulsar/internal/tiktok"
 	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
@@ -32,17 +36,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	twitchClient := twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)
-	twitchSource := twitch.NewSource(twitchClient)
+	source, channel, err := buildSource(ctx, cfg)
+	if err != nil {
+		slog.Error("build source failed", "err", err)
+		os.Exit(1)
+	}
 
 	telegramClient := telegram.NewClient(cfg.Telegram.BotToken)
 	telegramSink := telegram.NewSink(telegramClient)
-
-	channel, err := twitchSource.ResolveChannel(ctx, cfg.Twitch.ChannelName)
-	if err != nil {
-		slog.Error("fetch twitch channel failed", "err", err, "channel", cfg.Twitch.ChannelName)
-		os.Exit(1)
-	}
 
 	storePath := cfg.Store.Path
 	if storePath == "" {
@@ -71,7 +72,7 @@ func main() {
 		Style:  cfg.Template.Style,
 		Lang:   cfg.Template.Language,
 	}
-	poller := poll.NewPoller(twitchSource, telegramSink, st, *channel, pollCfg)
+	poller := poll.NewPoller(source, telegramSink, st, channel, pollCfg)
 
 	slog.Info("Starting poll", "channel", channel.Username)
 	poller.Poll(ctx)
@@ -84,5 +85,28 @@ func main() {
 		case <-ticker.C:
 			poller.Poll(ctx)
 		}
+	}
+}
+
+func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.Channel, error) {
+	switch {
+	case cfg.Twitch.Active():
+		s := twitch.NewSource(twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret))
+		ch, err := s.ResolveChannel(ctx, cfg.Twitch.ChannelName)
+		if err != nil {
+			return nil, domain.Channel{}, fmt.Errorf("resolve twitch channel %q: %w", cfg.Twitch.ChannelName, err)
+		}
+		return s, ch, nil
+
+	case cfg.TikTok.Active():
+		s := tiktok.NewSource(tiktok.NewClient())
+		ch, err := s.ResolveChannel(ctx, cfg.TikTok.Username)
+		if err != nil {
+			return nil, domain.Channel{}, fmt.Errorf("resolve tiktok channel %q: %w", cfg.TikTok.Username, err)
+		}
+		return s, ch, nil
+
+	default:
+		return nil, domain.Channel{}, errors.New("no source platform configured")
 	}
 }
