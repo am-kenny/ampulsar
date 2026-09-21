@@ -9,6 +9,14 @@ import (
 	"github.com/am-kenny/ampulsar/internal/domain"
 )
 
+type section interface {
+	fields() []fieldSpec
+}
+
+type defaulter interface {
+	defaults()
+}
+
 type fieldSpec struct {
 	name     string
 	parse    func(string) error
@@ -181,28 +189,30 @@ func (cfg *Config) validate() error {
 	return nil
 }
 
+func (cfg *Config) sections() []section {
+	return []section{
+		&cfg.Twitch,
+		&cfg.TikTok,
+		&cfg.Telegram,
+		&cfg.Discord,
+		&cfg.Template,
+		&cfg.Poll,
+		&cfg.Store,
+	}
+}
+
 // Load reads configuration from environment variables, validates it
 // and returns a populated Config or an error.
 func Load() (*Config, error) {
 	cfg := &Config{}
 
-	cfg.Telegram.defaults()
-	cfg.Template.defaults()
-	cfg.Poll.defaults()
+	for _, s := range cfg.sections() {
+		if d, ok := s.(defaulter); ok {
+			d.defaults()
+		}
 
-	groups := [][]fieldSpec{
-		cfg.Twitch.fields(),
-		cfg.TikTok.fields(),
-		cfg.Telegram.fields(),
-		cfg.Discord.fields(),
-		cfg.Template.fields(),
-		cfg.Poll.fields(),
-		cfg.Store.fields(),
-	}
-
-	for _, specs := range groups {
-		if err := loadFields(specs); err != nil {
-			return nil, fmt.Errorf("failed to load fields: %w", err)
+		if err := loadFields(s.fields()); err != nil {
+			return nil, err
 		}
 	}
 
