@@ -23,7 +23,7 @@ const (
 // either does not exist or has never gone live.
 var ErrNoLiveRoom = errors.New("no live room")
 
-type profileData struct {
+type ProfileData struct {
 	AuthorName     string `json:"author_name"`      // The display name
 	EmbedProductID string `json:"embed_product_id"` // The username
 }
@@ -85,7 +85,7 @@ func WithTimeout(d time.Duration) Option {
 	return func(c *Client) { c.timeout = d }
 }
 
-func (tc *Client) doGet(ctx context.Context, path string, params url.Values, result *userRoomResponse) error {
+func (tc *Client) doGet[T any](ctx context.Context, path string, params url.Values, result T) error {
 	u, err := url.Parse(tc.apiURL)
 	if err != nil {
 		return fmt.Errorf("tiktok %s: invalid url %q: %w", path, tc.apiURL, err)
@@ -136,7 +136,7 @@ func (tc *Client) getUserRoom(ctx context.Context, username string) (*userRoomRe
 
 	switch {
 	case resp.Message == "user_not_found":
-		return nil, fmt.Errorf("tiktok user %q not found or has never gone live", username)
+		return nil, fmt.Errorf("tiktok user %q: %w", username, ErrNoLiveRoom)
 	case resp.StatusCode != 0:
 		return nil, fmt.Errorf("tiktok %s: status code %d: %s", path, resp.StatusCode, resp.Message)
 	case resp.Data.User == nil:
@@ -146,6 +146,31 @@ func (tc *Client) getUserRoom(ctx context.Context, username string) (*userRoomRe
 	return &resp, nil
 }
 
+// FetchProfileByUsername works for any existing user, including one who has never gone live.
+func (tc *Client) FetchProfileByUsername(ctx context.Context, username string) (*ProfileData, error) {
+	const path = "/oembed"
+
+	params := url.Values{}
+	params.Set("url", "https://www.tiktok.com/@"+username)
+
+	var profile ProfileData
+
+	if err := tc.doGet(ctx, path, params, &profile); err != nil {
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusBadRequest {
+			return nil, fmt.Errorf("tiktok user %q not found", username)
+		}
+		return nil, err
+	}
+
+	if profile.EmbedProductID == "" {
+		return nil, fmt.Errorf("tiktok %s: response for %q contained no username", path, username)
+	}
+
+	return &profile, nil
+}
+
+// FetchUserByUsername returns ErrNoLiveRoom for a user who has never gone live.
 func (tc *Client) FetchUserByUsername(ctx context.Context, username string) (*UserData, error) {
 	resp, err := tc.getUserRoom(ctx, username)
 	if err != nil {

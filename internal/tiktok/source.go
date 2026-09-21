@@ -2,6 +2,7 @@ package tiktok
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
@@ -21,18 +22,34 @@ func (s *Source) Platform() domain.Platform {
 }
 
 func (s *Source) ResolveChannel(ctx context.Context, username string) (domain.Channel, error) {
-	user, err := s.client.FetchUserByUsername(ctx, username)
+	profile, err := s.client.FetchProfileByUsername(ctx, username)
 	if err != nil {
 		return domain.Channel{}, err
 	}
 
-	return domain.Channel{Platform: domain.TikTok, ID: user.ID, Username: user.UniqueID, DisplayName: user.Nickname}, nil
+	ch := domain.Channel{Platform: domain.TikTok, Username: profile.EmbedProductID, DisplayName: profile.AuthorName}
+	user, err := s.client.FetchUserByUsername(ctx, ch.Username)
+	switch {
+	case err == nil:
+		ch.ID = user.ID
+	case errors.Is(err, ErrNoLiveRoom):
+		// Never gone live
+	default:
+		return domain.Channel{}, err
+	}
+
+	return ch, nil
 }
 
 // FetchStream returns nil if the channel is offline
 func (s *Source) FetchStream(ctx context.Context, ch domain.Channel) (*domain.Snapshot, error) {
 	room, err := s.client.FetchUserRoomByUsername(ctx, ch.Username)
 	if err != nil {
+		// The channel was confirmed to exist when it was resolved, so no LIVE
+		// room means the user has never gone live.
+		if errors.Is(err, ErrNoLiveRoom) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
