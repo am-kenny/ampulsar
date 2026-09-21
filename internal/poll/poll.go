@@ -10,8 +10,8 @@ import (
 )
 
 type Source interface {
-	FetchStream(ctx context.Context, username string) (*domain.Snapshot, error)
-	FetchRecording(ctx context.Context, channelID, streamID string) (*domain.Recording, error)
+	FetchStream(ctx context.Context, channel domain.Channel) (*domain.Snapshot, error)
+	FetchRecording(ctx context.Context, channel domain.Channel, streamID string) (*domain.Recording, error)
 }
 
 type Sink interface {
@@ -70,7 +70,7 @@ func WithClock(now func() time.Time) Option {
 }
 
 func (p *Poller) Poll(ctx context.Context) {
-	snapshot, err := p.source.FetchStream(ctx, p.channel.Username)
+	snapshot, err := p.source.FetchStream(ctx, p.channel)
 	if err != nil {
 		slog.Error("poller: fetch stream failed", "err", err, "channel", p.channel.Username)
 		return
@@ -174,7 +174,7 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 		return
 	}
 
-	recording, err := p.source.FetchRecording(ctx, p.channel.ID, session.StreamID)
+	recording, err := p.source.FetchRecording(ctx, p.channel, session.StreamID)
 	if err != nil {
 		slog.Warn("poller: fetch recording failed", "err", err, "stream_id", session.StreamID)
 	}

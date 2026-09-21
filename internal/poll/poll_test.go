@@ -21,12 +21,12 @@ func (f *fakeSource) record(method string) {
 	f.calls = append(f.calls, method)
 }
 
-func (f *fakeSource) FetchStream(_ context.Context, _ string) (*domain.Snapshot, error) {
+func (f *fakeSource) FetchStream(_ context.Context, _ domain.Channel) (*domain.Snapshot, error) {
 	f.record("FetchStream")
 	return f.snapshot, nil
 }
 
-func (f *fakeSource) FetchRecording(_ context.Context, _, _ string) (*domain.Recording, error) {
+func (f *fakeSource) FetchRecording(_ context.Context, _ domain.Channel, _ string) (*domain.Recording, error) {
 	f.record("FetchRecording")
 	return f.recording, nil
 }
