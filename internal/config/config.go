@@ -65,6 +65,10 @@ func (cnf *TikTokConfig) fields() []fieldSpec {
 	}
 }
 
+func (cnf *TikTokConfig) Active() bool {
+	return cnf.Username != ""
+}
+
 type TelegramConfig struct {
 	BotToken     string
 	ChatID       string
