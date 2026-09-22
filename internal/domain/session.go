@@ -21,6 +21,7 @@ type Session struct {
 
 	Title string
 	Game  string
+	URL   string
 
 	EndedAt   time.Time
 	Recording Recording

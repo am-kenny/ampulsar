@@ -66,6 +66,7 @@ func (s *Source) FetchStream(ctx context.Context, ch domain.Channel) (*domain.Sn
 		StreamID:  room.User.RoomID,
 		Title:     room.LiveRoom.Title,
 		StartedAt: startedAt,
+		URL:       "https://www.tiktok.com/@" + ch.Username + "/live",
 	}, nil
 }
 

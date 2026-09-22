@@ -17,21 +17,21 @@ func NewSource(client *Client) *Source {
 }
 
 func (s *Source) ResolveChannel(ctx context.Context, username string) (domain.Channel, error) {
-	channel, err := s.client.FetchUserByUsername(ctx, username)
+	ch, err := s.client.FetchUserByUsername(ctx, username)
 	if err != nil {
 		return domain.Channel{}, err
 	}
 
 	return domain.Channel{
 		Platform:    domain.Twitch,
-		ID:          channel.ID,
-		Username:    channel.Login,
-		DisplayName: channel.DisplayName,
+		ID:          ch.ID,
+		Username:    ch.Login,
+		DisplayName: ch.DisplayName,
 	}, nil
 }
 
-func (s *Source) FetchStream(ctx context.Context, channel domain.Channel) (*domain.Snapshot, error) {
-	stream, err := s.client.FetchStreamByUsername(ctx, channel.Username)
+func (s *Source) FetchStream(ctx context.Context, ch domain.Channel) (*domain.Snapshot, error) {
+	stream, err := s.client.FetchStreamByUsername(ctx, ch.Username)
 	if err != nil {
 		return nil, err
 	}
@@ -50,11 +50,12 @@ func (s *Source) FetchStream(ctx context.Context, channel domain.Channel) (*doma
 		Title:     stream.Title,
 		Game:      stream.GameName,
 		StartedAt: startTime,
+		URL:       "https://www.twitch.tv/" + ch.Username,
 	}, nil
 }
 
-func (s *Source) FetchRecording(ctx context.Context, channel domain.Channel, streamID string) (*domain.Recording, error) {
-	recording, err := s.client.FetchStreamArchiveByUserIdAndStreamID(ctx, channel.ID, streamID)
+func (s *Source) FetchRecording(ctx context.Context, ch domain.Channel, streamID string) (*domain.Recording, error) {
+	recording, err := s.client.FetchStreamArchiveByUserIdAndStreamID(ctx, ch.ID, streamID)
 	if err != nil {
 		return nil, err
 	}

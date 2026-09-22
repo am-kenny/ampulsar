@@ -115,6 +115,7 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 		State:    domain.SessionLive,
 		Title:    snapshot.Title,
 		Game:     snapshot.Game,
+		URL:      snapshot.URL,
 	}
 
 	streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}

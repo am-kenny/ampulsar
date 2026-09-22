@@ -114,6 +114,7 @@ func liveSession() *domain.Session {
 		LiveMessage: domain.MessageRef{ID: "100", ChatID: "chat"},
 		Title:       "T",
 		Game:        "G",
+		URL:         "https://www.twitch.tv/streamer",
 	}
 }
 

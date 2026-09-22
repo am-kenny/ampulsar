@@ -20,6 +20,7 @@ func sampleEvent() message.StreamEvent {
 			},
 			Title: "🔴 Fun Title",
 			Game:  "Factorio",
+			URL:   "https://www.twitch.tv/streamer",
 			Recording: domain.Recording{
 				URL:      "https://vod",
 				Title:    "VOD Title",
@@ -72,6 +73,7 @@ func TestRenderContract(t *testing.T) {
 display={{.DisplayName}}
 user={{.Username}}
 game={{.Game}}
+url={{.URL}}
 ts={{.Timestamp}}
 trimmed={{trimRedDot .Title}}
 rec_title={{.Recording.Title}}
@@ -82,6 +84,7 @@ rec_dur={{hms .Recording.Duration}}`
 display=Streamer
 user=streamer
 game=Factorio
+url=https://www.twitch.tv/streamer
 ts=1700000000
 trimmed= Fun Title
 rec_title=VOD Title

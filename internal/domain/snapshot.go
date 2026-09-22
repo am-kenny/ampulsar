@@ -7,4 +7,5 @@ type Snapshot struct {
 	Title     string
 	Game      string
 	StartedAt time.Time
+	URL       string
 }

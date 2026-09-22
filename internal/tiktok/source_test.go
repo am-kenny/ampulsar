@@ -126,6 +126,7 @@ func TestFetchStreamMapsSnapshot(t *testing.T) {
 		StreamID:  "200",
 		Title:     "Title with & and <tags>",
 		StartedAt: time.Unix(startTime, 0).UTC(),
+		URL:       "https://www.tiktok.com/@test_user/live",
 	}
 	if *snap != want {
 		t.Errorf("snapshot = %+v, want %+v", *snap, want)
