@@ -1,0 +1,11 @@
+services:
+  ampulsar:
+    image: ghcr.io/am-kenny/ampulsar:latest
+    restart: unless-stopped
+    env_file: .env
+    read_only: true
+    volumes:
+      - ampulsar-data:/app/data
+
+volumes:
+  ampulsar-data:
