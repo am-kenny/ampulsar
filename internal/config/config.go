@@ -157,6 +157,7 @@ func (cnf *TemplateConfig) defaults() {
 
 type PollConfig struct {
 	Interval time.Duration
+	EndGrace time.Duration
 }
 
 // fields returns list of fieldSpec, holding env definitions
@@ -164,11 +165,13 @@ type PollConfig struct {
 func (cnf *PollConfig) fields() []fieldSpec {
 	return []fieldSpec{
 		{"POLL_INTERVAL", parseDuration(&cnf.Interval), false},
+		{"POLL_END_GRACE", parseDuration(&cnf.EndGrace), false},
 	}
 }
 
 func (cnf *PollConfig) defaults() {
-	cnf.Interval = 5 * time.Minute
+	cnf.Interval = 1 * time.Minute
+	cnf.EndGrace = 10 * time.Minute
 }
 
 type StoreConfig struct {
