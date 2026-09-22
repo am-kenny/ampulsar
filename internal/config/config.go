@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
@@ -23,21 +24,32 @@ type fieldSpec struct {
 	required bool
 }
 
-// populates each spec's target from its environment variable
+// loadFields populates each spec's target from its environment variable.
+// A group with no vars set gets ignored.
+// A group with partially set vars missing required vars produces an error.
 func loadFields(specs []fieldSpec) error {
+	var missing []string
+	present := false
+
 	for _, s := range specs {
 		v := os.Getenv(s.name)
 		if v == "" {
 			if s.required {
-				return fmt.Errorf("%s is required", s.name)
+				missing = append(missing, s.name)
 			}
 			continue
 		}
+
+		present = true
 
 		if err := s.parse(v); err != nil {
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
 	}
+	if present && len(missing) > 0 {
+		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+	}
+
 	return nil
 }
 
@@ -69,7 +81,7 @@ type TikTokConfig struct {
 // and pointers into the TikTokConfig for env loading
 func (cnf *TikTokConfig) fields() []fieldSpec {
 	return []fieldSpec{
-		{"TIKTOK_USERNAME", parseString(&cnf.Username), false},
+		{"TIKTOK_USERNAME", parseString(&cnf.Username), true},
 	}
 }
 
@@ -115,8 +127,8 @@ type DiscordConfig struct {
 // and pointers into the DiscordConfig for env loading
 func (cnf *DiscordConfig) fields() []fieldSpec {
 	return []fieldSpec{
-		{"DISCORD_BOT_TOKEN", parseString(&cnf.BotToken), false},
-		{"DISCORD_CHANNEL_ID", parseString(&cnf.ChannelID), false},
+		{"DISCORD_BOT_TOKEN", parseString(&cnf.BotToken), true},
+		{"DISCORD_CHANNEL_ID", parseString(&cnf.ChannelID), true},
 	}
 }
 
@@ -182,7 +194,16 @@ type Config struct {
 }
 
 func (cfg *Config) validate() error {
-	if !cfg.Discord.Active() && !cfg.Telegram.Active() {
+	if !cfg.Twitch.Active() && !cfg.TikTok.Active() {
+		return fmt.Errorf("no source platform configured")
+	}
+
+	// if !cfg.Discord.Active() && !cfg.Telegram.Active() {
+	// 	return fmt.Errorf("no receiving platform configured")
+	// }
+
+	// Discord is unsupported for now
+	if !cfg.Telegram.Active() {
 		return fmt.Errorf("no receiving platform configured")
 	}
 
