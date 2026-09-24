@@ -2,6 +2,7 @@ package tiktok_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -184,12 +185,12 @@ func TestFetchStreamBlocked(t *testing.T) {
 	}
 }
 
-func TestFetchRecordingReturnsNil(t *testing.T) {
+func TestFetchRecordingNoRecordings(t *testing.T) {
 	s := tiktok.NewSource(tiktok.NewClient())
 
 	rec, err := s.FetchRecording(context.Background(), resolvedChannel, "200")
-	if rec != nil || err != nil {
-		t.Fatalf("FetchRecording = %v, %v; want nil, nil", rec, err)
+	if rec != nil || !errors.Is(err, domain.ErrNoRecordings) {
+		t.Fatalf("FetchRecording = %v, %v; want nil, ErrNoRecordings", rec, err)
 	}
 }
 

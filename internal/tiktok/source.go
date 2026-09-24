@@ -72,5 +72,5 @@ func (s *Source) FetchStream(ctx context.Context, ch domain.Channel) (*domain.Sn
 
 // FetchRecording always returns nil: TikTok LIVE replays are not public
 func (s *Source) FetchRecording(ctx context.Context, ch domain.Channel, streamID string) (*domain.Recording, error) {
-	return nil, nil
+	return nil, domain.ErrNoRecordings
 }

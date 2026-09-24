@@ -2,6 +2,7 @@ package poll
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -176,20 +177,25 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 	}
 
 	recording, err := p.source.FetchRecording(ctx, p.channel, session.StreamID)
-	if err != nil {
-		slog.Warn("poller: fetch recording failed", "err", err, "stream_id", session.StreamID)
-	}
 
 	switch {
+	case errors.Is(err, domain.ErrNoRecordings):
+		slog.Debug("poller: source has no recordings, finalizing now", "platform", session.Platform)
+	case err != nil:
+		slog.Warn("poller: fetch recording failed", "err", err, "stream_id", session.StreamID)
+		if !expired {
+			return
+		}
 	case recording != nil:
 		session.Recording = *recording
-		p.finalizeOrGiveUp(ctx, session, expired)
 	case expired:
 		slog.Info("poller: recording grace expired", "stream_id", session.StreamID)
-		p.closeSession()
 	default:
 		// keep waiting
+		return
 	}
+
+	p.finalizeOrGiveUp(ctx, session, expired)
 }
 
 // finalizeOrGiveUp calls finalize; calls closeSession if call succeeds or if grace period is expired

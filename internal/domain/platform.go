@@ -1,5 +1,7 @@
 package domain
 
+import "errors"
+
 type Platform string
 
 const (
@@ -7,3 +9,5 @@ const (
 	YouTube Platform = "youtube"
 	TikTok  Platform = "tiktok"
 )
+
+var ErrNoRecordings = errors.New("platform does not publish recordings")

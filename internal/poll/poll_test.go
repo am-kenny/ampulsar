@@ -12,9 +12,10 @@ import (
 )
 
 type fakeSource struct {
-	calls     []string
-	snapshot  *domain.Snapshot
-	recording *domain.Recording
+	calls        []string
+	snapshot     *domain.Snapshot
+	recording    *domain.Recording
+	recordingErr error
 }
 
 func (f *fakeSource) record(method string) {
@@ -28,7 +29,7 @@ func (f *fakeSource) FetchStream(_ context.Context, _ domain.Channel) (*domain.S
 
 func (f *fakeSource) FetchRecording(_ context.Context, _ domain.Channel, _ string) (*domain.Recording, error) {
 	f.record("FetchRecording")
-	return f.recording, nil
+	return f.recording, f.recordingErr
 }
 
 type fakeSink struct {
@@ -118,6 +119,13 @@ func liveSession() *domain.Session {
 	}
 }
 
+func endedSession(ago time.Duration) *domain.Session {
+	s := liveSession()
+	s.State = domain.SessionEnded
+	s.EndedAt = testNow.Add(-ago)
+	return s
+}
+
 func TestPoll(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -131,6 +139,7 @@ func TestPoll(t *testing.T) {
 		wantSourceCalls []string
 		wantSinkCalls   []string
 		wantStored      bool
+		recordingErr    error
 	}{
 		{
 			name:            "stays live",
@@ -214,11 +223,42 @@ func TestPoll(t *testing.T) {
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
 			wantStored:      true,
 		},
+		{
+			name:            "offline source without recordings finalizes immediately",
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Edit"},
+			recordingErr:    domain.ErrNoRecordings,
+		},
+		{
+			name:            "ended past grace without recording finalizes",
+			starting:        endedSession(11 * time.Minute),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Edit"},
+		},
+		{
+			name:            "ended within grace with fetch error keeps session",
+			starting:        endedSession(5 * time.Minute),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantStored:      true,
+			recordingErr:    errors.New("unknown"),
+		},
+		{
+			name:            "ended past grace with fetch error finalizes",
+			starting:        endedSession(11 * time.Minute),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Edit"},
+			recordingErr:    errors.New("unknown"),
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			src := &fakeSource{snapshot: tt.snapshot, recording: tt.recording}
+			src := &fakeSource{snapshot: tt.snapshot, recording: tt.recording, recordingErr: tt.recordingErr}
 			sink := newFakeSink()
 			if tt.sendFails {
 				sink.errOn = map[string]error{"Send": errors.New("boom")}
