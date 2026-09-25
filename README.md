@@ -23,7 +23,7 @@ Observes a **Twitch** or **TikTok** channel and posts updates to **Telegram**.
 You need a Telegram bot token from [BotFather](https://t.me/BotFather) and ID of the chat to post into (can be retrieved with [ID BOT](https://t.me/idbot)). Add the bot to that chat, granting it required permissions.
 
 ### Twitch
-Twitch source requires an application to be registered in the [Twitch developer console](https://dev.twitch.tv/console/apps). Client ID and client secret are both provided by Twitch. 
+Twitch source requires an application to be registered in the [Twitch developer console](https://dev.twitch.tv/console/apps). Client ID and client secret are both provided by Twitch.
 
 ### TikTok
 TikTok source requires only the username to be set.
@@ -36,7 +36,7 @@ cd ampulsar
 docker compose up -d
 ```
 
-The `docker-compose.yaml` file mounts a named volume at `/app/data` to store the session.
+The `docker-compose.yaml` file mounts a named volume at `/app/data` to store the state file.
 
 To run it without Docker, build with Go 1.27 or newer:
 
@@ -44,7 +44,7 @@ To run it without Docker, build with Go 1.27 or newer:
 go build -o ampulsar ./cmd/bot
 ```
 
-The binary then writes a session file to the XDG state directory, `~/.local/state/ampulsar/session.json` on Linux. Set `STORE_PATH` in order to override the default path.
+The binary then writes a state file to the XDG state directory, `~/.local/state/ampulsar/session.json` on Linux. Set `STORE_PATH` in order to override the default path.
 
 ## Configuration
 
@@ -80,7 +80,7 @@ Twitch source is currently prioritized over TikTok.
 | `TEMPLATE_LANGUAGE` | no | `ru` | `eng` or `ru` |
 | `POLL_INTERVAL` | no | `1m` | Interval between each poll, for example `15s`, `2m30s` |
 | `POLL_END_GRACE` | no | `10m` | Wait period for a recording after a stream ends |
-| `STORE_PATH` | no | XDG state directory | Session file location. Defaults to `/app/data/store.json` in Docker image |
+| `STORE_PATH` | no | XDG state directory | State file location. Defaults to `/app/data/store.json` in Docker image |
 
 ## Messages
 

@@ -1,15 +1,14 @@
 package store_test
 
 import (
-	"os"
-	"path/filepath"
+	"errors"
 	"testing"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/store"
 )
 
-// Memory behavior
+// Session
 
 func TestMemoryGetEmptyReturnsNil(t *testing.T) {
 	var s store.Store
@@ -22,9 +21,7 @@ func TestMemorySetGetRoundTrip(t *testing.T) {
 	var s store.Store
 	want := domain.Session{StreamID: "s1", LiveMessage: domain.MessageRef{ID: "42", ChatID: "123"}, Title: "Factorio"}
 
-	if err := s.SetSession(want); err != nil {
-		t.Fatalf("SetSession: %v", err)
-	}
+	mustSetSession(t, &s, want)
 
 	got := s.GetSession()
 	if got == nil {
@@ -38,10 +35,8 @@ func TestMemorySetGetRoundTrip(t *testing.T) {
 func TestMemoryDelete(t *testing.T) {
 	var s store.Store
 	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
+	mustDeleteSession(t, &s)
 
-	if err := s.DeleteSession(); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
 	if got := s.GetSession(); got != nil {
 		t.Fatalf("after delete: want nil, got %+v", got)
 	}
@@ -61,102 +56,105 @@ func TestGetSessionReturnsCopy(t *testing.T) {
 	}
 }
 
-// File persistence
+// Deliveries
 
-func TestFileRoundTripSurvivesReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.json")
+func TestMemoryGetDeliveriesEmptyReturnsNil(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
 
-	s1 := mustNewFile(t, path)
-
-	want := domain.Session{StreamID: "s1", LiveMessage: domain.MessageRef{ID: "123", ChatID: "123"}, Title: "Factorio"}
-	if err := s1.SetSession(want); err != nil {
-		t.Fatalf("SetSession: %v", err)
-	}
-
-	s2 := mustNewFile(t, path)
-
-	got := s2.GetSession()
-	if got == nil {
-		t.Fatal("after reopen: got nil")
-	}
-	if *got != want {
-		t.Fatalf("reopen mismatch: want %+v, got %+v", want, *got)
+	if got := s.GetDeliveries(); got != nil {
+		t.Fatalf("no deliveries: want nil, got %+v", got)
 	}
 }
 
-func TestFileMissingIsEmpty(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "does-not-exist.json")
-	s := mustNewFile(t, path)
+func TestMemorySaveDeliveryWithoutSessionFails(t *testing.T) {
+	var s store.Store
 
-	if got := s.GetSession(); got != nil {
-		t.Fatalf("missing file: want empty, got %+v", got)
+	err := s.SaveDelivery(domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive})
+	if !errors.Is(err, store.ErrNoSession) {
+		t.Fatalf("want ErrNoSession, got %v", err)
 	}
 }
 
-func TestFileDeleteEmptiesFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "session.json")
+func TestMemorySaveDeliveryForOtherStreamFails(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
 
-	s1 := mustNewFile(t, path)
-	mustSetSession(t, s1, domain.Session{StreamID: "s1"})
-
-	if err := s1.DeleteSession(); err != nil {
-		t.Fatalf("DeleteSession: %v", err)
+	err := s.SaveDelivery(domain.Delivery{StreamID: "s2", Kind: domain.DeliveryLive})
+	if !errors.Is(err, store.ErrStaleDelivery) {
+		t.Fatalf("want ErrStaleDelivery, got %v", err)
 	}
-
-	s2 := mustNewFile(t, path)
-
-	if got := s2.GetSession(); got != nil {
-		t.Fatalf("after delete+reopen: want empty, got %+v", got)
+	if got := s.GetDeliveries(); got != nil {
+		t.Fatalf("rejected delivery was stored: %+v", got)
 	}
 }
 
-func TestFileNewFileUnwritableFails(t *testing.T) {
-	// A path whose parent is a file, not a directory, cannot be written
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "file")
-	if err := os.WriteFile(testFile, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
+func TestMemorySaveDeliveryKeepsOnePerKind(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
+
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive, State: domain.DeliveryPublishing})
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryEnded, State: domain.DeliveryPublishing})
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive, State: domain.DeliveryPublished})
+
+	got := s.GetDeliveries()
+	if len(got) != 2 {
+		t.Fatalf("want 2 deliveries, got %+v", got)
 	}
-	badPath := filepath.Join(testFile, "session.json") // appending file to another file
-
-	if _, err := store.NewFile(badPath); err == nil {
-		t.Fatal("NewFile on unwritable path: want error, got nil")
+	if got[0].Kind != domain.DeliveryLive || got[0].State != domain.DeliveryPublished {
+		t.Fatalf("live delivery not replaced in place: got %+v", got[0])
 	}
-}
-
-func TestFileCreatesMissingParentDir(t *testing.T) {
-	// A path several levels deep, none of which exist yet
-	path := filepath.Join(t.TempDir(), "a", "b", "c", "session.json")
-
-	s := mustNewFile(t, path)
-
-	want := domain.Session{StreamID: "s1", Title: "Factorio"}
-	if err := s.SetSession(want); err != nil {
-		t.Fatalf("SetSession into created dir: %v", err)
-	}
-
-	// Reopen from the same path to confirm persistence
-	s2 := mustNewFile(t, path)
-	got := s2.GetSession()
-	if got == nil || got.StreamID != "s1" {
-		t.Fatalf("nested path did not persist: got %+v", got)
+	if got[1].Kind != domain.DeliveryEnded {
+		t.Fatalf("ended delivery: got %+v", got[1])
 	}
 }
 
-// mustSet stores session and fails the test if that errors
-func mustSetSession(t *testing.T, s *store.Store, session domain.Session) {
-	t.Helper()
-	if err := s.SetSession(session); err != nil {
-		t.Fatalf("setup SetSession: %v", err)
+func TestMemorySameStreamKeepsDeliveries(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1", Version: 1})
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive})
+
+	mustSetSession(t, &s, domain.Session{StreamID: "s1", Version: 2})
+
+	if got := s.GetDeliveries(); len(got) != 1 {
+		t.Fatalf("session update of same stream: want 1 delivery, got %+v", got)
 	}
 }
 
-// mustNewFile initializes new file store and fails the test if that errors
-func mustNewFile(t *testing.T, path string) *store.Store {
-	t.Helper()
-	s, err := store.NewFile(path)
-	if err != nil {
-		t.Fatalf("NewFile(%s): %v", path, err)
+func TestMemoryNewStreamClearsDeliveries(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive})
+
+	mustSetSession(t, &s, domain.Session{StreamID: "s2"})
+
+	if got := s.GetDeliveries(); got != nil {
+		t.Fatalf("after new stream: want no deliveries, got %+v", got)
 	}
-	return s
+}
+
+func TestMemoryDeleteSessionClearsDeliveries(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive})
+	mustDeleteSession(t, &s)
+
+	if got := s.GetDeliveries(); got != nil {
+		t.Fatalf("after delete: want no deliveries, got %+v", got)
+	}
+}
+
+// Test immutability
+func TestGetDeliveriesReturnsCopy(t *testing.T) {
+	var s store.Store
+	mustSetSession(t, &s, domain.Session{StreamID: "s1"})
+	mustSaveDelivery(t, &s, domain.Delivery{StreamID: "s1", Kind: domain.DeliveryLive, State: domain.DeliveryPublishing})
+
+	got := s.GetDeliveries()
+	got[0].State = domain.DeliveryPublished
+
+	again := s.GetDeliveries()
+	if again[0].State != domain.DeliveryPublishing {
+		t.Fatalf("stored state was mutated through returned slice: got %q", again[0].State)
+	}
 }

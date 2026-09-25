@@ -47,7 +47,7 @@ func main() {
 
 	storePath := cfg.Store.Path
 	if storePath == "" {
-		storePath, err = xdg.StateFile("ampulsar/session.json")
+		storePath, err = xdg.StateFile("ampulsar/state.json")
 		if err != nil {
 			slog.Error("state directory init failed", "err", err, "path", storePath)
 			os.Exit(1)
