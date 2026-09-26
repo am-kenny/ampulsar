@@ -163,6 +163,7 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 	}
 }
 
+// handleLive applies session changes and syncs the message of type Live if configured
 func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapshot *domain.Snapshot) {
 	if session.Title != snapshot.Title || session.Game != snapshot.Game {
 		slog.Info("poller: stream info changed", "stream_id", session.StreamID, "title", snapshot.Title, "game", snapshot.Game)
@@ -181,6 +182,7 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 	}
 }
 
+// syncLive edits the message of type Live if it has an older version
 func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
 	live := p.liveDelivery(session)
 
