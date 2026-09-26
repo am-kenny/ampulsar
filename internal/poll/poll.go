@@ -27,15 +27,18 @@ type Store interface {
 	GetSession() *domain.Session
 	SetSession(domain.Session) error
 	DeleteSession() error
+	GetDeliveries() []domain.Delivery
+	SaveDelivery(domain.Delivery) error
 }
 
 type Config struct {
-	ChatID   string
-	Pin      bool
-	OnEnd    domain.EndPolicy
-	Style    string // Template style
-	Lang     string // Template language
-	EndGrace time.Duration
+	ChatID       string
+	Pin          bool
+	EditOnChange bool
+	OnEnd        domain.EndPolicy
+	Style        string // Template style
+	Lang         string // Template language
+	EndGrace     time.Duration
 }
 
 type Poller struct {
@@ -101,7 +104,8 @@ func (p *Poller) Poll(ctx context.Context) {
 		// waiting for recording or retrying end-of-stream delivery
 		p.handleEnded(ctx, session)
 	default:
-		// still live with the same StreamID, nothing to do
+		// still live with the same StreamID
+		p.handleLive(ctx, session, snapshot)
 	}
 }
 
@@ -114,6 +118,7 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 		Channel:  p.channel,
 		StreamID: snapshot.StreamID,
 		State:    domain.SessionLive,
+		Version:  1,
 		Title:    snapshot.Title,
 		Game:     snapshot.Game,
 		URL:      snapshot.URL,
@@ -143,6 +148,18 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err)
+		return
+	}
+
+	d := domain.Delivery{
+		StreamID:      snapshot.StreamID,
+		Kind:          domain.DeliveryLive,
+		State:         domain.DeliveryPublished,
+		Ref:           session.LiveMessage,
+		SyncedVersion: session.Version,
+	}
+	if err = p.store.SaveDelivery(d); err != nil {
+		slog.Warn("poller: save delivery failed", "err", err, "delivery", d)
 	}
 }
 
@@ -161,6 +178,60 @@ func (p *Poller) markEnded(ctx context.Context, session *domain.Session) {
 
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err)
+	}
+}
+
+func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapshot *domain.Snapshot) {
+	if session.Title != snapshot.Title || session.Game != snapshot.Game {
+		slog.Info("poller: stream info changed", "stream_id", session.StreamID, "title", snapshot.Title, "game", snapshot.Game)
+		session.Title = snapshot.Title
+		session.Game = snapshot.Game
+		session.Version++
+
+		if err := p.store.SetSession(*session); err != nil {
+			slog.Warn("poller: set session failed", "err", err, "session", session)
+			return
+		}
+	}
+
+	if p.config.EditOnChange {
+		var live domain.Delivery
+		found := false
+		for _, d := range p.store.GetDeliveries() {
+			if d.Kind == domain.DeliveryLive {
+				live, found = d, true
+				break
+			}
+		}
+		if !found {
+			live = domain.Delivery{
+				StreamID: session.StreamID,
+				Kind:     domain.DeliveryLive,
+				State:    domain.DeliveryPublished,
+				Ref:      session.LiveMessage,
+			}
+		}
+
+		if live.SyncedVersion == session.Version {
+			return
+		}
+
+		streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
+
+		text, err := message.FormatLive(p.config.Style, p.config.Lang, streamEvent)
+		if err != nil {
+			// formatting is deterministic, do not retry
+			slog.Warn("poller: message formatting failed", "err", err, "stream_event", streamEvent)
+		} else if err = p.sink.Edit(ctx, live.Ref, text); err != nil {
+			slog.Warn("poller: message live edit failed", "err", err, "chat_id", live.Ref.ChatID)
+			return
+		}
+
+		live.SyncedVersion = session.Version
+
+		if err := p.store.SaveDelivery(live); err != nil {
+			slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+		}
 	}
 }
 
