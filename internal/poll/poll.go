@@ -163,24 +163,6 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 	}
 }
 
-// markEnded unpins the live message if configured and records the session as ended
-func (p *Poller) markEnded(ctx context.Context, session *domain.Session) {
-	slog.Info("poller: stream went offline")
-
-	if p.config.Pin {
-		if err := p.sink.Unpin(ctx, session.LiveMessage); err != nil {
-			slog.Warn("poller: unpin message failed", "err", err, "chat_id", p.config.ChatID)
-		}
-	}
-
-	session.State = domain.SessionEnded
-	session.EndedAt = p.now()
-
-	if err := p.store.SetSession(*session); err != nil {
-		slog.Warn("poller: set session failed", "err", err)
-	}
-}
-
 func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapshot *domain.Snapshot) {
 	if session.Title != snapshot.Title || session.Game != snapshot.Game {
 		slog.Info("poller: stream info changed", "stream_id", session.StreamID, "title", snapshot.Title, "game", snapshot.Game)
@@ -236,6 +218,24 @@ func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
 
 	if err := p.store.SaveDelivery(live); err != nil {
 		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+	}
+}
+
+// markEnded unpins the live message if configured and records the session as ended
+func (p *Poller) markEnded(ctx context.Context, session *domain.Session) {
+	slog.Info("poller: stream went offline")
+
+	if p.config.Pin {
+		if err := p.sink.Unpin(ctx, session.LiveMessage); err != nil {
+			slog.Warn("poller: unpin message failed", "err", err, "chat_id", p.config.ChatID)
+		}
+	}
+
+	session.State = domain.SessionEnded
+	session.EndedAt = p.now()
+
+	if err := p.store.SetSession(*session); err != nil {
+		slog.Warn("poller: set session failed", "err", err)
 	}
 }
 
