@@ -182,22 +182,7 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 }
 
 func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
-	var live domain.Delivery
-	found := false
-	for _, d := range p.store.GetDeliveries() {
-		if d.Kind == domain.DeliveryLive {
-			live, found = d, true
-			break
-		}
-	}
-	if !found {
-		live = domain.Delivery{
-			StreamID: session.StreamID,
-			Kind:     domain.DeliveryLive,
-			State:    domain.DeliveryPublished,
-			Ref:      session.LiveMessage,
-		}
-	}
+	live := p.liveDelivery(session)
 
 	if live.SyncedVersion == session.Version {
 		return
@@ -218,6 +203,22 @@ func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
 
 	if err := p.store.SaveDelivery(live); err != nil {
 		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+	}
+}
+
+// liveDelivery returns the stored delivery of type Live
+func (p *Poller) liveDelivery(session *domain.Session) domain.Delivery {
+	for _, d := range p.store.GetDeliveries() {
+		if d.Kind == domain.DeliveryLive {
+			return d
+		}
+	}
+
+	return domain.Delivery{
+		StreamID: session.StreamID,
+		Kind:     domain.DeliveryLive,
+		State:    domain.DeliveryPublished,
+		Ref:      session.LiveMessage,
 	}
 }
 
