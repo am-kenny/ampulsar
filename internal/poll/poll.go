@@ -195,43 +195,47 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 	}
 
 	if p.config.EditOnChange {
-		var live domain.Delivery
-		found := false
-		for _, d := range p.store.GetDeliveries() {
-			if d.Kind == domain.DeliveryLive {
-				live, found = d, true
-				break
-			}
-		}
-		if !found {
-			live = domain.Delivery{
-				StreamID: session.StreamID,
-				Kind:     domain.DeliveryLive,
-				State:    domain.DeliveryPublished,
-				Ref:      session.LiveMessage,
-			}
-		}
+		p.syncLive(ctx, session)
+	}
+}
 
-		if live.SyncedVersion == session.Version {
-			return
+func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
+	var live domain.Delivery
+	found := false
+	for _, d := range p.store.GetDeliveries() {
+		if d.Kind == domain.DeliveryLive {
+			live, found = d, true
+			break
 		}
-
-		streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
-
-		text, err := message.FormatLive(p.config.Style, p.config.Lang, streamEvent)
-		if err != nil {
-			// formatting is deterministic, do not retry
-			slog.Warn("poller: message formatting failed", "err", err, "stream_event", streamEvent)
-		} else if err = p.sink.Edit(ctx, live.Ref, text); err != nil {
-			slog.Warn("poller: message live edit failed", "err", err, "chat_id", live.Ref.ChatID)
-			return
+	}
+	if !found {
+		live = domain.Delivery{
+			StreamID: session.StreamID,
+			Kind:     domain.DeliveryLive,
+			State:    domain.DeliveryPublished,
+			Ref:      session.LiveMessage,
 		}
+	}
 
-		live.SyncedVersion = session.Version
+	if live.SyncedVersion == session.Version {
+		return
+	}
 
-		if err := p.store.SaveDelivery(live); err != nil {
-			slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
-		}
+	streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
+
+	text, err := message.FormatLive(p.config.Style, p.config.Lang, streamEvent)
+	if err != nil {
+		// formatting is deterministic, do not retry
+		slog.Warn("poller: message formatting failed", "err", err, "stream_event", streamEvent)
+	} else if err = p.sink.Edit(ctx, live.Ref, text); err != nil {
+		slog.Warn("poller: message live edit failed", "err", err, "chat_id", live.Ref.ChatID)
+		return
+	}
+
+	live.SyncedVersion = session.Version
+
+	if err := p.store.SaveDelivery(live); err != nil {
+		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
 	}
 }
 
