@@ -18,18 +18,39 @@ type defaulter interface {
 	defaults()
 }
 
+// toggled config sections get a check if their config must be loaded
+type toggled interface {
+	toggle() (name string, dst *bool)
+}
+
 type fieldSpec struct {
 	name     string
 	parse    func(string) error
 	required bool
 }
 
+// loadSection checks if group has toggled interface.
+// If it has an interface and enabled is falsy, the group gets skipped.
+// Otherwise loadFields is called on the group fields
+func loadSection(s section) error {
+	if t, ok := s.(toggled); ok {
+		name, on := t.toggle()
+		if v := os.Getenv(name); v != "" {
+			if err := parseBool(on)(v); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+		}
+		if !*on {
+			return nil
+		}
+	}
+	return loadFields(s.fields())
+}
+
 // loadFields populates each spec's target from its environment variable.
-// A group with no vars set gets ignored.
-// A group with partially set vars missing required vars produces an error.
+// A group missing required vars produces an error.
 func loadFields(specs []fieldSpec) error {
 	var missing []string
-	present := false
 
 	for _, s := range specs {
 		v := os.Getenv(s.name)
@@ -40,13 +61,11 @@ func loadFields(specs []fieldSpec) error {
 			continue
 		}
 
-		present = true
-
 		if err := s.parse(v); err != nil {
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
 	}
-	if present && len(missing) > 0 {
+	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 	}
 
@@ -54,6 +73,7 @@ func loadFields(specs []fieldSpec) error {
 }
 
 type TwitchConfig struct {
+	Enabled      bool
 	ClientID     string
 	ClientSecret string
 	ChannelName  string
@@ -69,11 +89,12 @@ func (cnf *TwitchConfig) fields() []fieldSpec {
 	}
 }
 
-func (cnf *TwitchConfig) Active() bool {
-	return cnf.ClientID != "" && cnf.ClientSecret != "" && cnf.ChannelName != ""
+func (cnf *TwitchConfig) toggle() (string, *bool) {
+	return "TWITCH_ENABLED", &cnf.Enabled
 }
 
 type TikTokConfig struct {
+	Enabled  bool
 	Username string
 }
 
@@ -85,11 +106,12 @@ func (cnf *TikTokConfig) fields() []fieldSpec {
 	}
 }
 
-func (cnf *TikTokConfig) Active() bool {
-	return cnf.Username != ""
+func (cnf *TikTokConfig) toggle() (string, *bool) {
+	return "TIKTOK_ENABLED", &cnf.Enabled
 }
 
 type TelegramConfig struct {
+	Enabled      bool
 	BotToken     string
 	ChatID       string
 	EditOnChange bool
@@ -109,8 +131,8 @@ func (cnf *TelegramConfig) fields() []fieldSpec {
 	}
 }
 
-func (cnf *TelegramConfig) Active() bool {
-	return cnf.BotToken != "" && cnf.ChatID != ""
+func (cnf *TelegramConfig) toggle() (string, *bool) {
+	return "TELEGRAM_ENABLED", &cnf.Enabled
 }
 
 func (cnf *TelegramConfig) defaults() {
@@ -119,6 +141,7 @@ func (cnf *TelegramConfig) defaults() {
 }
 
 type DiscordConfig struct {
+	Enabled   bool
 	BotToken  string
 	ChannelID string
 }
@@ -132,8 +155,8 @@ func (cnf *DiscordConfig) fields() []fieldSpec {
 	}
 }
 
-func (cnf *DiscordConfig) Active() bool {
-	return cnf.BotToken != "" && cnf.ChannelID != ""
+func (cnf *DiscordConfig) toggle() (string, *bool) {
+	return "DISCORD_ENABLED", &cnf.Enabled
 }
 
 type TemplateConfig struct {
@@ -197,17 +220,22 @@ type Config struct {
 }
 
 func (cfg *Config) validate() error {
-	if !cfg.Twitch.Active() && !cfg.TikTok.Active() {
-		return fmt.Errorf("no source platform configured")
+	if !cfg.Twitch.Enabled && !cfg.TikTok.Enabled {
+		return fmt.Errorf("no source platform enabled")
 	}
 
-	// if !cfg.Discord.Active() && !cfg.Telegram.Active() {
-	// 	return fmt.Errorf("no receiving platform configured")
+	// Only one source can run at a time for now
+	if cfg.Twitch.Enabled && cfg.TikTok.Enabled {
+		return fmt.Errorf("only one source platform at a time is supported")
+	}
+
+	// if !cfg.Discord.Enabled && !cfg.Telegram.Enabled {
+	// 	return fmt.Errorf("no receiving platform enabled")
 	// }
 
 	// Discord is unsupported for now
-	if !cfg.Telegram.Active() {
-		return fmt.Errorf("no receiving platform configured")
+	if !cfg.Telegram.Enabled {
+		return fmt.Errorf("no receiving platform enabled")
 	}
 
 	return nil
@@ -235,7 +263,7 @@ func Load() (*Config, error) {
 			d.defaults()
 		}
 
-		if err := loadFields(s.fields()); err != nil {
+		if err := loadSection(s); err != nil {
 			return nil, err
 		}
 	}
