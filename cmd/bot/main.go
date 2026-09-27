@@ -92,7 +92,7 @@ func main() {
 
 func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.Channel, error) {
 	switch {
-	case cfg.Twitch.Active():
+	case cfg.Twitch.Enabled:
 		s := twitch.NewSource(twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret))
 		ch, err := s.ResolveChannel(ctx, cfg.Twitch.ChannelName)
 		if err != nil {
@@ -100,7 +100,7 @@ func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.C
 		}
 		return s, ch, nil
 
-	case cfg.TikTok.Active():
+	case cfg.TikTok.Enabled:
 		s := tiktok.NewSource(tiktok.NewClient())
 		ch, err := s.ResolveChannel(ctx, cfg.TikTok.Username)
 		if err != nil {
