@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -321,4 +322,15 @@ func (e *APIError) MigrateToChatID() int64 {
 		return e.parameters.MigrateToChatID
 	}
 	return 0
+}
+
+var ErrNotModified = errors.New("telegram: message is not modified")
+
+func (e *APIError) Is(target error) bool {
+	switch target {
+	case ErrNotModified:
+		return e.StatusCode == http.StatusBadRequest &&
+			strings.Contains(e.Description, "message is not modified")
+	}
+	return false
 }
