@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,7 +130,11 @@ func (tc *Client) call[T any](ctx context.Context, method string, body any, resu
 
 	resp, err := tc.httpClient.Do(req)
 	if err != nil {
-		return err
+		// hide bot token
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err
+		}
+		return fmt.Errorf("telegram %s: %w", method, err)
 	}
 
 	defer resp.Body.Close()
