@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -36,7 +37,12 @@ func (s *Sink) Edit(ctx context.Context, ref domain.MessageRef, text string) err
 		return err
 	}
 
-	return s.client.EditHTMLMessageText(ctx, ref.ChatID, id, text)
+	err = s.client.EditHTMLMessageText(ctx, ref.ChatID, id, text)
+	if errors.Is(err, ErrNotModified) {
+		return nil
+	}
+
+	return err
 }
 
 func (s *Sink) Delete(ctx context.Context, ref domain.MessageRef) error {
