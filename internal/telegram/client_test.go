@@ -195,3 +195,26 @@ func TestRequestShape(t *testing.T) {
 		})
 	}
 }
+
+func TestNotModified(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		want        bool
+	}{
+		{"not modified", "Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message", true},
+		{"other bad request", "Bad Request: message to edit not found", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"ok":false,"error_code":400,"description":"` + tt.description + `"}`
+			c := newClient(t, 400, body)
+
+			err := c.EditHTMLMessageText(t.Context(), "c", 1, "t")
+			if got := errors.Is(err, telegram.ErrNotModified); got != tt.want {
+				t.Errorf("errors.Is(err, ErrNotModified) = %v, want %v (err: %v)", got, tt.want, err)
+			}
+		})
+	}
+}
