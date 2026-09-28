@@ -8,6 +8,8 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +67,34 @@ func TestRetryAfter(t *testing.T) {
 	_, err := c.SendMessage(context.Background(), "c", "t", telegram.ParseHTML)
 	if e := wantAPIError(t, err); e.RetryAfter() != 30*time.Second {
 		t.Errorf("RetryAfter = %v, want 30s", e.RetryAfter())
+	}
+}
+
+func TestTransportErrorHidesToken(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close() // connection refused on every request
+
+	c := telegram.NewClient(token, telegram.WithBaseURL(srv.URL))
+	_, err := c.SendMessage(t.Context(), "c", "t", telegram.ParseHTML)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Errorf("error leaks token: %v", err)
+	}
+	if _, ok := errors.AsType[*url.Error](err); ok {
+		t.Errorf("url.Error not unwrapped: %v", err)
+	}
+}
+
+func TestCanceledContextKeepsCause(t *testing.T) {
+	c := newClient(t, 200, `{"ok":true,"result":{"message_id":1}}`)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := c.SendMessage(ctx, "c", "t", telegram.ParseHTML)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("want context.Canceled, got %v", err)
 	}
 }
 
