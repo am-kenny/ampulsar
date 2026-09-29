@@ -12,7 +12,7 @@
 
 ---
 
-AmPulsar posts one message when a channel goes live, pins it if you ask. Once the broadcast is over, the bot unpins the Live message and either posts a new message with a recording or edits the existing one, depending on the policy you choose. The live session is persisted, so bot restarting mid-stream continues where it paused.
+AmPulsar posts one message when a channel goes live, pins it if you ask. While the stream runs, it can keep that message in sync with the broadcast data. Once the broadcast is over, the bot unpins the Live message and either posts a new message with a recording or edits the existing one, depending on the policy you choose. The live session is persisted, so bot restarting mid-stream continues where it paused.
 
 Observes a **Twitch** or **TikTok** channel and posts updates to **Telegram**.
 
@@ -44,34 +44,44 @@ To run it without Docker, build with Go 1.27 or newer:
 go build -o ampulsar ./cmd/bot
 ```
 
+Load environment variables and run it:
+
+```bash
+set -a; . ./.env; set +a
+./ampulsar
+```
+
 The binary then writes a state file to the XDG state directory, `~/.local/state/ampulsar/state.json` on Linux. Set `STORE_PATH` in order to override the default path.
 
 ## Configuration
 
-Configuration is made with environment variables grouped by platform. A group with no environment variables set is considered off.
+Configuration is made with environment variables grouped by platform. A group is considered off unless `<PLATFORM>_ENABLED` is set to `true`.
 
 ### Source, pick one
 
 | Variable | Required | Description |
 | --- | --- | --- |
+| `TWITCH_ENABLED` | unless `TIKTOK_ENABLED` is true | Set to `true` to enable Twitch source |
 | `TWITCH_CLIENT_ID` | with Twitch | Client id of your Twitch application |
 | `TWITCH_CLIENT_SECRET` | with Twitch | Client secret, used for an app access token |
 | `TWITCH_CHANNEL_NAME` | with Twitch | Channel login name to watch, lowercase, no URL |
+| `TIKTOK_ENABLED` | unless `TWITCH_ENABLED` is true | Set to `true` to enable TikTok source |
 | `TIKTOK_USERNAME` | with TikTok | Username to watch, without the `@` |
 
-Twitch source is currently prioritized over TikTok.
+Exactly one source must be enabled. Enabling both or neither fails bot at startup.
 
 ### Telegram
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
+| `TELEGRAM_ENABLED` | yes | `false` | Must be `true`, it is currently the only destination platform |
 | `TELEGRAM_BOT_TOKEN` | yes | | Bot token from [BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | yes | | Target chat ID from [ID BOT](https://t.me/idbot) |
 | `TELEGRAM_PIN` | no | `false` | Pin message while live, unpin at the end |
 | `TELEGRAM_EDIT_ON_CHANGE` | no | `false` | Edit the live message when the stream title or game changes |
 | `TELEGRAM_ACTION_ON_END` | no | `edit_in_place` | `edit_in_place`, `new_message`, `delete` or `none` |
 
-`edit_in_place` rewrites live message with offline template, `new_message` posts new message with offline template, `delete` deletes live message, `none` does nothing (except unpinning, if the message was pinned). The first two policies wait for the stream recording. If recording is not published within `POLL_END_GRACE` the policy falls back to `none` and closes the session. TikTok does not have stream recordings published, you should use `delete` or `none` with TikTok source.
+`edit_in_place` rewrites live message with offline template, `new_message` posts new message with offline template, `delete` deletes live message, `none` does nothing (except unpinning, if the message was pinned). The first two policies wait for the stream recording. If recording is not published within `POLL_END_GRACE` the message is sent without it. TikTok does not have stream recordings published, session is finalized as soon as the live stops.
 
 ### Messages and runtime
 
@@ -97,7 +107,14 @@ and, once the recording is up:
 >
 > 📼 **Watch the recording**
 
-Titles are HTML escaped, so characters like `<` and `&` cannot break the message. The `simplified` style currently has only live templates, you should set `TELEGRAM_ACTION_ON_END` to `none` or `delete`.
+or, if the recording was never published:
+
+> ⚫ Stream ended: Space Age - day 3
+>
+> No recording available.
+
+
+Titles are HTML escaped, so characters like `<` and `&` cannot break the message.
 
 ## Roadmap
 
