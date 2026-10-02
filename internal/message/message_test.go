@@ -106,3 +106,26 @@ func TestRenderParseError(t *testing.T) {
 		t.Fatal("want parse error for malformed template, got nil")
 	}
 }
+
+func TestCheck(t *testing.T) {
+	tests := []struct {
+		style   string
+		lang    string
+		wantErr bool
+	}{
+		{"default", "eng", false},
+		{"default", "ru", false},
+		{"simplified", "eng", false},
+		{"simplified", "ru", false},
+		{"unknown", "eng", true},
+		{"default", "unknown", true},
+		{"", "", true},
+	}
+
+	for _, tt := range tests {
+		err := message.Check(tt.style, tt.lang)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("Check(%q,%q) error = %v, wantErr %v", tt.style, tt.lang, err, tt.wantErr)
+		}
+	}
+}

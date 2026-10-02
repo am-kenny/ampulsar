@@ -16,6 +16,16 @@ type StreamEvent struct {
 	Timestamp int64
 }
 
+type kind string
+
+const (
+	kindLive    kind = "live"
+	kindOffline kind = "offline"
+)
+
+// list of all required kinds in a template pack
+var kinds = []kind{kindLive, kindOffline}
+
 var funcMap = template.FuncMap{
 	"trimRedDot": func(s string) string {
 		return strings.TrimPrefix(s, "🔴")
@@ -34,9 +44,22 @@ var templateFS embed.FS
 
 var templates = template.Must(template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.gotmpl"))
 
+func templateName(k kind, style, lang string) string {
+	return fmt.Sprintf("%s_%s_%s.html.gotmpl", k, style, lang)
+}
+
+func Check(style, lang string) error {
+	for _, k := range kinds {
+		if templates.Lookup(templateName(k, style, lang)) == nil {
+			return fmt.Errorf("message: no %s template for style %q and language %q", k, style, lang)
+		}
+	}
+	return nil
+}
+
 // render looks up template by type, style, language and executes it against event
-func render(messageType, style, lang string, e StreamEvent) (string, error) {
-	name := fmt.Sprintf("%s_%s_%s.html.gotmpl", messageType, style, lang)
+func render(k kind, style, lang string, e StreamEvent) (string, error) {
+	name := templateName(k, style, lang)
 
 	t := templates.Lookup(name)
 	if t == nil {
@@ -66,9 +89,9 @@ func execute(t *template.Template, e StreamEvent) (string, error) {
 }
 
 func FormatLive(style, lang string, e StreamEvent) (string, error) {
-	return render("live", style, lang, e)
+	return render(kindLive, style, lang, e)
 }
 
 func FormatWentOffline(style, lang string, e StreamEvent) (string, error) {
-	return render("offline", style, lang, e)
+	return render(kindOffline, style, lang, e)
 }
