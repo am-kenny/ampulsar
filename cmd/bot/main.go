@@ -14,6 +14,7 @@ import (
 
 	"github.com/am-kenny/ampulsar/internal/config"
 	"github.com/am-kenny/ampulsar/internal/domain"
+	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/poll"
 	"github.com/am-kenny/ampulsar/internal/store"
 	"github.com/am-kenny/ampulsar/internal/telegram"
@@ -32,6 +33,11 @@ func main() {
 	}
 
 	slog.Info("Configuration loaded successfully")
+
+	if err = message.Check(cfg.Template.Style, cfg.Template.Language); err != nil {
+		slog.Error("template check failed", "err", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
