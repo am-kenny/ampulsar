@@ -218,3 +218,37 @@ func TestNotModified(t *testing.T) {
 		})
 	}
 }
+
+func TestNotFound(t *testing.T) {
+	tests := []struct {
+		name        string
+		call        func(*telegram.Client) error
+		description string
+		want        bool
+	}{
+		{"delete not found", deleteMsg, "Bad Request: message to delete not found", true},
+		{"edit not found", editMsg, "Bad Request: message to edit not found", true},
+		{"cannot delete", deleteMsg, "Bad Request: message can't be deleted for everyone", false},
+		{"not modified", editMsg, "Bad Request: message is not modified", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `{"ok":false,"error_code":400,"description":"` + tt.description + `"}`
+			c := newClient(t, 400, body)
+
+			err := tt.call(c)
+			if got := errors.Is(err, telegram.ErrNotFound); got != tt.want {
+				t.Errorf("errors.Is(err, ErrNotFound) = %v, want %v (err: %v)", got, tt.want, err)
+			}
+		})
+	}
+}
+
+func deleteMsg(c *telegram.Client) error {
+	return c.DeleteMessage(context.Background(), "c", 1)
+}
+
+func editMsg(c *telegram.Client) error {
+	return c.EditHTMLMessageText(context.Background(), "c", 1, "t")
+}

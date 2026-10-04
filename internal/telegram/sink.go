@@ -37,6 +37,7 @@ func (s *Sink) Edit(ctx context.Context, ref domain.MessageRef, text string) err
 		return err
 	}
 
+	// Existing message is the same as text
 	err = s.client.EditHTMLMessageText(ctx, ref.ChatID, id, text)
 	if errors.Is(err, ErrNotModified) {
 		return nil
@@ -51,7 +52,13 @@ func (s *Sink) Delete(ctx context.Context, ref domain.MessageRef) error {
 		return err
 	}
 
-	return s.client.DeleteMessage(ctx, ref.ChatID, id)
+	// Message is already deleted
+	err = s.client.DeleteMessage(ctx, ref.ChatID, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+
+	return err
 }
 
 func (s *Sink) Pin(ctx context.Context, ref domain.MessageRef) error {

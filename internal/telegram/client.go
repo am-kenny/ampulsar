@@ -324,13 +324,20 @@ func (e *APIError) MigrateToChatID() int64 {
 	return 0
 }
 
-var ErrNotModified = errors.New("telegram: message is not modified")
+var (
+	ErrNotModified = errors.New("telegram: message is not modified")
+	ErrNotFound    = errors.New("telegram: message not found")
+)
 
 func (e *APIError) Is(target error) bool {
 	switch target {
 	case ErrNotModified:
 		return e.StatusCode == http.StatusBadRequest &&
 			strings.Contains(e.Description, "message is not modified")
+	case ErrNotFound:
+		return e.StatusCode == http.StatusBadRequest &&
+			(strings.Contains(e.Description, "message to delete not found") ||
+				strings.Contains(e.Description, "message to edit not found"))
 	}
 	return false
 }
