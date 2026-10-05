@@ -293,7 +293,7 @@ func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
 	cfg := p.config
 
 	switch cfg.OnEnd {
-	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage:
+	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage, domain.EndPolicyReplace:
 		streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
 		text, err := message.FormatWentOffline(cfg.Style, cfg.Lang, streamEvent)
 		if err != nil {
@@ -302,8 +302,14 @@ func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
 			return nil
 		}
 
-		if cfg.OnEnd == domain.EndPolicyEditInPlace {
+		switch cfg.OnEnd {
+		case domain.EndPolicyEditInPlace:
 			return p.sink.Edit(ctx, session.LiveMessage, text)
+		case domain.EndPolicyReplace:
+			live := p.liveDelivery(session)
+			if err := p.sink.Delete(ctx, live.Ref); err != nil {
+				return err
+			}
 		}
 
 		_, err = p.sink.Send(ctx, cfg.ChatID, text)
