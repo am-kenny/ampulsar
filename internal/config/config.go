@@ -308,7 +308,7 @@ func parseEndPolicy(dst *domain.EndPolicy) func(string) error {
 	return func(v string) error {
 		p := domain.EndPolicy(v)
 		if !p.Valid() {
-			return fmt.Errorf("want edit_in_place, new_message, delete or none, got %q", v)
+			return fmt.Errorf("want edit_in_place, new_message, replace, delete or none, got %q", v)
 		}
 		*dst = p
 		return nil

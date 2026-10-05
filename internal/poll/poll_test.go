@@ -167,13 +167,14 @@ func liveDeliveryAt(version int) domain.Delivery {
 
 func TestPoll(t *testing.T) {
 	tests := []struct {
-		name      string
-		snapshot  *domain.Snapshot
-		recording *domain.Recording
-		starting  *domain.Session
-		onEnd     domain.EndPolicy
-		pin       bool
-		sendFails bool
+		name        string
+		snapshot    *domain.Snapshot
+		recording   *domain.Recording
+		starting    *domain.Session
+		onEnd       domain.EndPolicy
+		pin         bool
+		sendFails   bool
+		deleteFails bool
 
 		wantSourceCalls []string
 		wantSinkCalls   []string
@@ -258,6 +259,42 @@ func TestPoll(t *testing.T) {
 			wantSourceCalls: []string{"FetchStream"},
 			wantSinkCalls:   []string{"Unpin", "Delete"},
 		},
+
+		{
+			name:            "offline replace deletes then posts",
+			starting:        liveSession(),
+			recording:       &domain.Recording{URL: "u"},
+			onEnd:           domain.EndPolicyReplace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Delete", "Send"},
+		},
+		{
+			name:            "offline replace waits for recording",
+			starting:        liveSession(),
+			onEnd:           domain.EndPolicyReplace,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantStored:      true,
+		},
+		{
+			name:            "offline replace delete fails does not post",
+			starting:        liveSession(),
+			recording:       &domain.Recording{URL: "u"},
+			onEnd:           domain.EndPolicyReplace,
+			deleteFails:     true,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Delete"},
+			wantStored:      true,
+		},
+		{
+			name:            "offline replace send fails keeps session",
+			starting:        liveSession(),
+			recording:       &domain.Recording{URL: "u"},
+			onEnd:           domain.EndPolicyReplace,
+			sendFails:       true,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Delete", "Send"},
+			wantStored:      true,
+		},
 		{
 			name:            "offline no recording keeps session",
 			starting:        liveSession(),
@@ -311,8 +348,12 @@ func TestPoll(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			src := &fakeSource{snapshot: tt.snapshot, recording: tt.recording, recordingErr: tt.recordingErr}
 			sink := newFakeSink()
+			sink.errOn = map[string]error{}
 			if tt.sendFails {
-				sink.errOn = map[string]error{"Send": errors.New("boom")}
+				sink.errOn["Send"] = errors.New("boom")
+			}
+			if tt.deleteFails {
+				sink.errOn["Delete"] = errors.New("boom")
 			}
 			st := newStore(t, tt.starting)
 
