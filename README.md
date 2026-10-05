@@ -79,9 +79,9 @@ Exactly one source must be enabled. Enabling both or neither fails bot at startu
 | `TELEGRAM_CHAT_ID` | yes | | Target chat ID from [ID BOT](https://t.me/idbot) |
 | `TELEGRAM_PIN` | no | `false` | Pin message while live, unpin at the end |
 | `TELEGRAM_EDIT_ON_CHANGE` | no | `false` | Edit the live message when the stream title or game changes |
-| `TELEGRAM_ACTION_ON_END` | no | `edit_in_place` | `edit_in_place`, `new_message`, `delete` or `none` |
+| `TELEGRAM_ACTION_ON_END` | no | `edit_in_place` | `edit_in_place`, `new_message`, `replace`, `delete` or `none` |
 
-`edit_in_place` rewrites live message with offline template, `new_message` posts new message with offline template, `delete` deletes live message, `none` does nothing (except unpinning, if the message was pinned). The first two policies wait for the stream recording. If recording is not published within `POLL_END_GRACE` the message is sent without it. TikTok does not have stream recordings published, session is finalized as soon as the live stops.
+`edit_in_place` rewrites live message with offline template, `new_message` posts new message with offline template, `replace` deletes live message, then posts new offline message with offline template, `delete` deletes live message, `none` does nothing (except unpinning, if the message was pinned). The first three policies wait for the stream recording. If recording is not published within `POLL_END_GRACE` the message is sent without it. TikTok does not have stream recordings published, session is finalized as soon as the live stops.
 
 ### Messages and runtime
 
