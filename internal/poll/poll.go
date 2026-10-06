@@ -229,7 +229,8 @@ func (p *Poller) markEnded(ctx context.Context, session *domain.Session) {
 	slog.Info("poller: stream went offline")
 
 	if p.config.Pin {
-		if err := p.sink.Unpin(ctx, session.LiveMessage); err != nil {
+		live := p.liveDelivery(session)
+		if err := p.sink.Unpin(ctx, live.Ref); err != nil {
 			slog.Warn("poller: unpin message failed", "err", err, "chat_id", p.config.ChatID)
 		}
 	}
@@ -291,6 +292,7 @@ func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, 
 // finalize puts end policy into action
 func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
 	cfg := p.config
+	live := p.liveDelivery(session)
 
 	switch cfg.OnEnd {
 	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage, domain.EndPolicyReplace:
@@ -304,9 +306,8 @@ func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
 
 		switch cfg.OnEnd {
 		case domain.EndPolicyEditInPlace:
-			return p.sink.Edit(ctx, session.LiveMessage, text)
+			return p.sink.Edit(ctx, live.Ref, text)
 		case domain.EndPolicyReplace:
-			live := p.liveDelivery(session)
 			if err := p.sink.Delete(ctx, live.Ref); err != nil {
 				return err
 			}
@@ -316,7 +317,7 @@ func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
 		return err
 
 	case domain.EndPolicyDelete:
-		return p.sink.Delete(ctx, session.LiveMessage)
+		return p.sink.Delete(ctx, live.Ref)
 	case domain.EndPolicyNone:
 		// No extra actions
 	}
