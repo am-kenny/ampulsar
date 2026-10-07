@@ -505,3 +505,83 @@ func TestPollStreamInfoChange(t *testing.T) {
 		})
 	}
 }
+
+func TestPollRecording(t *testing.T) {
+	tests := []struct {
+		name      string
+		starting  *domain.Session
+		recording *domain.Recording
+		editFails bool
+
+		wantSourceCalls []string
+		wantSinkCalls   []string
+		wantStored      bool
+		wantURL         string // expected stored recording URL, checked when the session is stored
+		wantVersion     int    // expected stored session version, checked when the session is stored
+	}{
+		{
+			name:            "found recording is stored when end action fails",
+			starting:        endedSession(5 * time.Minute),
+			recording:       &domain.Recording{URL: "u"},
+			editFails:       true,
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantURL:         "u",
+			wantVersion:     2,
+		},
+		{
+			name: "stored recording is not fetched again",
+			starting: func() *domain.Session {
+				s := endedSession(5 * time.Minute)
+				s.Recording = domain.Recording{URL: "u"}
+				s.Version = 2
+				return s
+			}(),
+			wantSourceCalls: []string{"FetchStream"},
+			wantSinkCalls:   []string{"Edit"},
+		},
+		{
+			name:            "waiting for recording keeps version",
+			starting:        endedSession(5 * time.Minute),
+			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
+			wantStored:      true,
+			wantVersion:     1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &fakeSource{recording: tt.recording}
+			sink := newFakeSink()
+			sink.errOn = map[string]error{}
+			if tt.editFails {
+				sink.errOn["Edit"] = errors.New("boom")
+			}
+			st := newStore(t, tt.starting)
+
+			newPoller(src, sink, st, domain.EndPolicyEditInPlace, false, false).Poll(context.Background())
+
+			if !slices.Equal(src.calls, tt.wantSourceCalls) {
+				t.Errorf("source calls = %v, want %v", src.calls, tt.wantSourceCalls)
+			}
+			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
+				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
+			}
+			if got := st.GetSession() != nil; got != tt.wantStored {
+				t.Fatalf("session stored = %v, want %v", got, tt.wantStored)
+			}
+			if !tt.wantStored {
+				return
+			}
+
+			s := mustGetSession(t, st)
+			if s.Recording.URL != tt.wantURL {
+				t.Errorf("recording URL = %q, want %q", s.Recording.URL, tt.wantURL)
+			}
+			if s.Version != tt.wantVersion {
+				t.Errorf("version = %d, want %d", s.Version, tt.wantVersion)
+			}
+		})
+	}
+}

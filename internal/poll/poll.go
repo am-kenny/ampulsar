@@ -255,6 +255,12 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 		return
 	}
 
+	if session.Recording.URL != "" {
+		// recording was found on an earlier tick, only the end action is left
+		p.finalizeOrGiveUp(ctx, session, expired)
+		return
+	}
+
 	recording, err := p.source.FetchRecording(ctx, p.channel, session.StreamID)
 
 	switch {
@@ -267,6 +273,11 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 		}
 	case recording != nil:
 		session.Recording = *recording
+		session.Version++
+
+		if err := p.store.SetSession(*session); err != nil {
+			slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
+		}
 	case expired:
 		slog.Info("poller: recording grace expired", "stream_id", session.StreamID)
 	default:
