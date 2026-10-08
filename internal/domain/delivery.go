@@ -21,6 +21,7 @@ type Delivery struct {
 
 	Ref           MessageRef
 	SyncedVersion int // the Session.Version this message currently shows
+	Pinned        bool
 }
 
 type MessageRef struct {
