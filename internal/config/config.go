@@ -197,6 +197,22 @@ func (cnf *PollConfig) defaults() {
 	cnf.EndGrace = 10 * time.Minute
 }
 
+type ReconcileConfig struct {
+	Interval time.Duration
+}
+
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the ReconcileConfig for env loading
+func (cnf *ReconcileConfig) fields() []fieldSpec {
+	return []fieldSpec{
+		{"RECONCILE_INTERVAL", parseDuration(&cnf.Interval), false},
+	}
+}
+
+func (cnf *ReconcileConfig) defaults() {
+	cnf.Interval = 1 * time.Minute
+}
+
 type StoreConfig struct {
 	Path string
 }
@@ -210,13 +226,27 @@ func (cnf *StoreConfig) fields() []fieldSpec {
 }
 
 type Config struct {
-	Twitch   TwitchConfig
-	TikTok   TikTokConfig
-	Telegram TelegramConfig
-	Discord  DiscordConfig
-	Template TemplateConfig
-	Poll     PollConfig
-	Store    StoreConfig
+	Twitch    TwitchConfig
+	TikTok    TikTokConfig
+	Telegram  TelegramConfig
+	Discord   DiscordConfig
+	Template  TemplateConfig
+	Poll      PollConfig
+	Reconcile ReconcileConfig
+	Store     StoreConfig
+}
+
+func (cfg *Config) sections() []section {
+	return []section{
+		&cfg.Twitch,
+		&cfg.TikTok,
+		&cfg.Telegram,
+		&cfg.Discord,
+		&cfg.Template,
+		&cfg.Poll,
+		&cfg.Reconcile,
+		&cfg.Store,
+	}
 }
 
 func (cfg *Config) validate() error {
@@ -239,18 +269,6 @@ func (cfg *Config) validate() error {
 	}
 
 	return nil
-}
-
-func (cfg *Config) sections() []section {
-	return []section{
-		&cfg.Twitch,
-		&cfg.TikTok,
-		&cfg.Telegram,
-		&cfg.Discord,
-		&cfg.Template,
-		&cfg.Poll,
-		&cfg.Store,
-	}
 }
 
 // Load reads configuration from environment variables, validates it
