@@ -165,12 +165,19 @@ func liveDeliveryAt(version int) domain.Delivery {
 	}
 }
 
+func pinnedDeliveryAt(version int) domain.Delivery {
+	d := liveDeliveryAt(version)
+	d.Pinned = true
+	return d
+}
+
 func TestPoll(t *testing.T) {
 	tests := []struct {
 		name        string
 		snapshot    *domain.Snapshot
 		recording   *domain.Recording
 		starting    *domain.Session
+		deliveries  []domain.Delivery
 		onEnd       domain.EndPolicy
 		pin         bool
 		sendFails   bool
@@ -254,12 +261,12 @@ func TestPoll(t *testing.T) {
 		{
 			name:            "offline delete with pin unpins first",
 			starting:        liveSession(),
+			deliveries:      []domain.Delivery{pinnedDeliveryAt(1)},
 			onEnd:           domain.EndPolicyDelete,
 			pin:             true,
 			wantSourceCalls: []string{"FetchStream"},
 			wantSinkCalls:   []string{"Unpin", "Delete"},
 		},
-
 		{
 			name:            "offline replace deletes then posts",
 			starting:        liveSession(),
@@ -355,7 +362,7 @@ func TestPoll(t *testing.T) {
 			if tt.deleteFails {
 				sink.errOn["Delete"] = errors.New("boom")
 			}
-			st := newStore(t, tt.starting)
+			st := newStore(t, tt.starting, tt.deliveries...)
 
 			newPoller(src, sink, st, tt.onEnd, tt.pin, false).Poll(context.Background())
 
@@ -369,8 +376,12 @@ func TestPoll(t *testing.T) {
 				t.Errorf("session stored = %v, want %v", got, tt.wantStored)
 			}
 			if tt.wantSynced != 0 {
-				if got := mustLiveDelivery(t, st).SyncedVersion; got != tt.wantSynced {
-					t.Errorf("synced version = %d, want %d", got, tt.wantSynced)
+				live := mustLiveDelivery(t, st)
+				if live.SyncedVersion != tt.wantSynced {
+					t.Errorf("synced version = %d, want %d", live.SyncedVersion, tt.wantSynced)
+				}
+				if live.Pinned != tt.pin {
+					t.Errorf("pinned = %v, want %v", live.Pinned, tt.pin)
 				}
 			}
 		})
@@ -501,6 +512,100 @@ func TestPollStreamInfoChange(t *testing.T) {
 			}
 			if synced := mustLiveDelivery(t, st).SyncedVersion; synced != tt.wantSynced {
 				t.Errorf("synced version = %d, want %d", synced, tt.wantSynced)
+			}
+		})
+	}
+}
+
+func TestPollPin(t *testing.T) {
+	tests := []struct {
+		name       string
+		snapshot   *domain.Snapshot
+		starting   *domain.Session
+		delivery   domain.Delivery
+		pin        bool
+		unpinFails bool
+
+		wantSinkCalls []string
+		wantStored    bool
+		wantPinned    bool // checked when the session is stored
+	}{
+		{
+			name:          "live and not pinned retries pin",
+			snapshot:      liveSnapshot(),
+			starting:      liveSession(),
+			delivery:      liveDeliveryAt(1),
+			pin:           true,
+			wantSinkCalls: []string{"Pin"},
+			wantStored:    true,
+			wantPinned:    true,
+		},
+		{
+			name:       "live and already pinned does nothing",
+			snapshot:   liveSnapshot(),
+			starting:   liveSession(),
+			delivery:   pinnedDeliveryAt(1),
+			pin:        true,
+			wantStored: true,
+			wantPinned: true,
+		},
+		{
+			name:          "offline unpins pinned message without pin config",
+			starting:      liveSession(),
+			delivery:      pinnedDeliveryAt(1),
+			wantSinkCalls: []string{"Unpin", "Edit"},
+		},
+		{
+			name:          "offline unpin fails holds end action",
+			starting:      liveSession(),
+			delivery:      pinnedDeliveryAt(1),
+			pin:           true,
+			unpinFails:    true,
+			wantSinkCalls: []string{"Unpin"},
+			wantStored:    true,
+			wantPinned:    true,
+		},
+		{
+			name:          "ended within grace retries unpin",
+			starting:      endedSession(5 * time.Minute),
+			delivery:      pinnedDeliveryAt(1),
+			pin:           true,
+			wantSinkCalls: []string{"Unpin", "Edit"},
+		},
+		{
+			name:          "ended past grace with unpin failing finalizes",
+			starting:      endedSession(11 * time.Minute),
+			delivery:      pinnedDeliveryAt(1),
+			pin:           true,
+			unpinFails:    true,
+			wantSinkCalls: []string{"Unpin", "Edit"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &fakeSource{snapshot: tt.snapshot, recording: &domain.Recording{URL: "u"}}
+			sink := newFakeSink()
+			sink.errOn = map[string]error{}
+			if tt.unpinFails {
+				sink.errOn["Unpin"] = errors.New("boom")
+			}
+			st := newStore(t, tt.starting, tt.delivery)
+
+			newPoller(src, sink, st, domain.EndPolicyEditInPlace, tt.pin, false).Poll(context.Background())
+
+			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
+				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
+			}
+			if got := st.GetSession() != nil; got != tt.wantStored {
+				t.Fatalf("session stored = %v, want %v", got, tt.wantStored)
+			}
+			if !tt.wantStored {
+				return
+			}
+
+			if got := mustLiveDelivery(t, st).Pinned; got != tt.wantPinned {
+				t.Errorf("pinned = %v, want %v", got, tt.wantPinned)
 			}
 		})
 	}
