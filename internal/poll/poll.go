@@ -350,11 +350,12 @@ func (p *Poller) finishSession(ctx context.Context, session *domain.Session) {
 func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, expired bool) {
 	if err := p.finalize(ctx, session); err != nil {
 		slog.Warn("poller: finalize failed", "err", err)
-		if !expired {
-			return
-		}
 	} else {
 		p.markLiveDone(session)
+	}
+
+	if !allDone(p.store.GetDeliveries()) && !expired {
+		return
 	}
 
 	p.closeSession()
@@ -368,6 +369,16 @@ func (p *Poller) markLiveDone(session *domain.Session) {
 	if err := p.store.SaveDelivery(live); err != nil {
 		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
 	}
+}
+
+// allDone returns true if every delivery is of state done
+func allDone(deliveries []domain.Delivery) bool {
+	for _, d := range deliveries {
+		if d.State != domain.DeliveryDone {
+			return false
+		}
+	}
+	return true
 }
 
 // finalize puts end policy into action
