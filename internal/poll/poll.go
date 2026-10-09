@@ -188,7 +188,11 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 
 // pinLive pins the message of type Live if it is not pinned yet
 func (p *Poller) pinLive(ctx context.Context, session *domain.Session) {
-	live := p.liveDelivery(session)
+	live, ok := p.liveDelivery(session)
+
+	if !ok || live.Pinned {
+		return
+	}
 
 	if live.Pinned {
 		return
@@ -208,9 +212,9 @@ func (p *Poller) pinLive(ctx context.Context, session *domain.Session) {
 
 // unpinLive unpins the message of type Live if it is pinned and reports whether it is left unpinned
 func (p *Poller) unpinLive(ctx context.Context, session *domain.Session) bool {
-	live := p.liveDelivery(session)
+	live, ok := p.liveDelivery(session)
 
-	if !live.Pinned {
+	if !ok || !live.Pinned {
 		return true
 	}
 
@@ -230,9 +234,9 @@ func (p *Poller) unpinLive(ctx context.Context, session *domain.Session) bool {
 
 // syncLive edits the message of type Live if it has an older version
 func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
-	live := p.liveDelivery(session)
+	live, ok := p.liveDelivery(session)
 
-	if live.SyncedVersion == session.Version {
+	if !ok || live.SyncedVersion == session.Version {
 		return
 	}
 
@@ -255,19 +259,14 @@ func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
 }
 
 // liveDelivery returns the stored delivery of type Live
-func (p *Poller) liveDelivery(session *domain.Session) domain.Delivery {
+func (p *Poller) liveDelivery(session *domain.Session) (domain.Delivery, bool) {
 	for _, d := range p.store.GetDeliveries() {
 		if d.Kind == domain.DeliveryLive {
-			return d
+			return d, true
 		}
 	}
 
-	return domain.Delivery{
-		StreamID: session.StreamID,
-		Kind:     domain.DeliveryLive,
-		State:    domain.DeliveryPublished,
-		Ref:      session.LiveMessage,
-	}
+	return domain.Delivery{}, false
 }
 
 // markEnded marks the session as ended
@@ -359,27 +358,17 @@ func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, 
 
 // endLive calls finalize and marks the message of type Live as done
 func (p *Poller) endLive(ctx context.Context, session *domain.Session) {
-	live := p.liveDelivery(session)
+	live, ok := p.liveDelivery(session)
 
-	if live.State == domain.DeliveryDone {
+	if !ok || live.State == domain.DeliveryDone {
 		return
 	}
 
-	if err := p.finalize(ctx, session); err != nil {
+	if err := p.finalize(ctx, session, live); err != nil {
 		slog.Warn("poller: finalize failed", "err", err)
 		return
 	}
 
-	live.State = domain.DeliveryDone
-
-	if err := p.store.SaveDelivery(live); err != nil {
-		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
-	}
-}
-
-// markLiveDone marks the message of type Live as having nothing left to do
-func (p *Poller) markLiveDone(session *domain.Session) {
-	live := p.liveDelivery(session)
 	live.State = domain.DeliveryDone
 
 	if err := p.store.SaveDelivery(live); err != nil {
@@ -398,9 +387,8 @@ func allDone(deliveries []domain.Delivery) bool {
 }
 
 // finalize puts end policy into action
-func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
+func (p *Poller) finalize(ctx context.Context, session *domain.Session, live domain.Delivery) error {
 	cfg := p.config
-	live := p.liveDelivery(session)
 
 	switch cfg.OnEnd {
 	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage, domain.EndPolicyReplace:

@@ -365,7 +365,12 @@ func TestPoll(t *testing.T) {
 			if tt.deleteFails {
 				sink.errOn["Delete"] = errors.New("boom")
 			}
-			st := newStore(t, tt.starting, tt.deliveries...)
+			deliveries := tt.deliveries
+			if tt.starting != nil && deliveries == nil {
+				// a stored session always comes with its live delivery
+				deliveries = []domain.Delivery{liveDeliveryAt(1)}
+			}
+			st := newStore(t, tt.starting, deliveries...)
 
 			newPoller(src, sink, st, tt.onEnd, tt.pin, false).Poll(context.Background())
 
@@ -475,17 +480,6 @@ func TestPollStreamInfoChange(t *testing.T) {
 			wantGame:      "G",
 			wantVersion:   2,
 			wantSynced:    2,
-		},
-		{
-			name:          "missing live delivery is rebuilt from session",
-			snapshot:      liveSnapshot(),
-			version:       1,
-			editOnChange:  true,
-			wantSinkCalls: []string{"Edit"},
-			wantTitle:     "T",
-			wantGame:      "G",
-			wantVersion:   1,
-			wantSynced:    1,
 		},
 	}
 
