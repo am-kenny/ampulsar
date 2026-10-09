@@ -138,13 +138,13 @@ func liveSnapshot() *domain.Snapshot {
 func liveSession() *domain.Session {
 	return &domain.Session{
 		Platform: domain.Twitch, ID: "u1",
-		Username:    "streamer",
-		StreamID:    "s1",
-		State:       domain.SessionLive,
-		Version:     1,
-		Title:       "T",
-		Game:        "G",
-		URL:         "https://www.twitch.tv/streamer",
+		Username: "streamer",
+		StreamID: "s1",
+		State:    domain.SessionLive,
+		Version:  1,
+		Title:    "T",
+		Game:     "G",
+		URL:      "https://www.twitch.tv/streamer",
 	}
 }
 

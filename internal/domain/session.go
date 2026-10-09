@@ -14,9 +14,9 @@ const (
 type Session struct {
 	Channel
 
-	StreamID    string
-	State       SessionState
-	Version     int
+	StreamID string
+	State    SessionState
+	Version  int
 
 	Title string
 	Game  string
