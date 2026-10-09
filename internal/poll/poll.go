@@ -353,9 +353,21 @@ func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, 
 		if !expired {
 			return
 		}
+	} else {
+		p.markLiveDone(session)
 	}
 
 	p.closeSession()
+}
+
+// markLiveDone marks the message of type Live as having nothing left to do
+func (p *Poller) markLiveDone(session *domain.Session) {
+	live := p.liveDelivery(session)
+	live.State = domain.DeliveryDone
+
+	if err := p.store.SaveDelivery(live); err != nil {
+		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+	}
 }
 
 // finalize puts end policy into action
