@@ -72,13 +72,14 @@ func main() {
 	defer ticker.Stop()
 
 	pollCfg := poll.Config{
-		ChatID:       cfg.Telegram.ChatID,
-		Pin:          cfg.Telegram.Pin,
-		EditOnChange: cfg.Telegram.EditOnChange,
-		OnEnd:        cfg.Telegram.OnEnd,
-		Style:        cfg.Template.Style,
-		Lang:         cfg.Template.Language,
-		EndGrace:     cfg.Poll.EndGrace,
+		ChatID:           cfg.Telegram.ChatID,
+		Pin:              cfg.Telegram.Pin,
+		EditOnChange:     cfg.Telegram.EditOnChange,
+		OnEnd:            cfg.Telegram.OnEnd,
+		Style:            cfg.Template.Style,
+		Lang:             cfg.Template.Language,
+		EndGrace:         cfg.Poll.EndGrace,
+		WaitForRecording: cfg.Telegram.OnEnd.NeedsRecording(),
 	}
 	poller := poll.NewPoller(source, telegramSink, st, channel, pollCfg)
 

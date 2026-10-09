@@ -125,6 +125,7 @@ func newPoller(src poll.Source, sink poll.Sink, st poll.Store, onEnd domain.EndP
 		poll.Config{
 			ChatID: "chat", Pin: pin, EditOnChange: editOnChange, OnEnd: onEnd,
 			Style: "default", Lang: "eng", EndGrace: 10 * time.Minute,
+			WaitForRecording: onEnd.NeedsRecording(),
 		},
 		poll.WithClock(func() time.Time { return testNow }),
 	)

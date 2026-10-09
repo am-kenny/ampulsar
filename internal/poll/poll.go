@@ -39,6 +39,7 @@ type Config struct {
 	Style        string // Template style
 	Lang         string // Template language
 	EndGrace     time.Duration
+	WaitForRecording bool
 }
 
 type Poller struct {
@@ -293,7 +294,7 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 		return
 	}
 
-	if p.config.OnEnd == domain.EndPolicyDelete || p.config.OnEnd == domain.EndPolicyNone {
+	if !p.config.WaitForRecording {
 		p.finalizeOrGiveUp(ctx, session, expired)
 		return
 	}
