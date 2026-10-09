@@ -287,23 +287,18 @@ func (p *Poller) markEnded(session *domain.Session) {
 	}
 }
 
-// handleEnded unpins the live message, fetches recording if required by end policy and calls p.finalizeOrGiveUp
-// this is the part that determines if grace threshold is reached
+// handleEnded waits for the recording while the session is ended, then finishes the session
 func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
-	slog.Debug("poller: ending session")
+	if session.State == domain.SessionEnded {
+		p.awaitRecording(ctx, session)
+	}
 
+	p.finishSession(ctx, session)
+}
+
+// awaitRecording fetches the recording and checks if the end grace is over
+func (p *Poller) awaitRecording(ctx context.Context, session *domain.Session) {
 	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
-
-	// the end action waits for the unpin, until the grace period is over
-	if !p.unpinLive(ctx, session) && !expired {
-		return
-	}
-
-	if session.State == domain.SessionArchived || session.State == domain.SessionClosed {
-		// recording was found on an earlier tick or is not required
-		p.finalizeOrGiveUp(ctx, session, expired)
-		return
-	}
 
 	recording, err := p.source.FetchRecording(ctx, p.channel, session.StreamID)
 
@@ -331,6 +326,21 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
+	}
+}
+
+// finishSession unpins the live message and, once the wait for the recording is over, calls p.finalizeOrGiveUp
+func (p *Poller) finishSession(ctx context.Context, session *domain.Session) {
+	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
+
+	// the end action waits for the unpin, until the grace period is over
+	if !p.unpinLive(ctx, session) && !expired {
+		return
+	}
+
+	if session.State == domain.SessionEnded {
+		// waiting for the recording
+		return
 	}
 
 	p.finalizeOrGiveUp(ctx, session, expired)
