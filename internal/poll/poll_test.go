@@ -286,6 +286,7 @@ func TestPoll(t *testing.T) {
 		{
 			name:            "offline replace delete fails does not post",
 			starting:        liveSession(),
+			deliveries:      []domain.Delivery{liveDeliveryAt(1)},
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyReplace,
 			deleteFails:     true,
@@ -296,6 +297,7 @@ func TestPoll(t *testing.T) {
 		{
 			name:            "offline replace send fails keeps session",
 			starting:        liveSession(),
+			deliveries:      []domain.Delivery{liveDeliveryAt(1)},
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyReplace,
 			sendFails:       true,
@@ -668,7 +670,7 @@ func TestPollRecording(t *testing.T) {
 			if tt.editFails {
 				sink.errOn["Edit"] = errors.New("boom")
 			}
-			st := newStore(t, tt.starting)
+			st := newStore(t, tt.starting, liveDeliveryAt(1))
 
 			newPoller(src, sink, st, domain.EndPolicyEditInPlace, false, false).Poll(context.Background())
 

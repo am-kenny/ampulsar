@@ -346,19 +346,35 @@ func (p *Poller) finishSession(ctx context.Context, session *domain.Session) {
 	p.finalizeOrGiveUp(ctx, session, expired)
 }
 
-// finalizeOrGiveUp calls finalize; calls closeSession if call succeeds or if grace period is expired
+// finalizeOrGiveUp calls endLive and closes session if all deliveries are done or if grace period is expired
 func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, expired bool) {
-	if err := p.finalize(ctx, session); err != nil {
-		slog.Warn("poller: finalize failed", "err", err)
-	} else {
-		p.markLiveDone(session)
-	}
+	p.endLive(ctx, session)
 
 	if !allDone(p.store.GetDeliveries()) && !expired {
 		return
 	}
 
 	p.closeSession()
+}
+
+// endLive calls finalize and marks the message of type Live as done
+func (p *Poller) endLive(ctx context.Context, session *domain.Session) {
+	live := p.liveDelivery(session)
+
+	if live.State == domain.DeliveryDone {
+		return
+	}
+
+	if err := p.finalize(ctx, session); err != nil {
+		slog.Warn("poller: finalize failed", "err", err)
+		return
+	}
+
+	live.State = domain.DeliveryDone
+
+	if err := p.store.SaveDelivery(live); err != nil {
+		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+	}
 }
 
 // markLiveDone marks the message of type Live as having nothing left to do
