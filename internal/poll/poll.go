@@ -82,10 +82,6 @@ func (p *Poller) Poll(ctx context.Context) {
 
 	session := p.store.GetSession()
 
-	if session != nil && session.State == "" {
-		session.State = domain.SessionLive
-	}
-
 	switch {
 	case session == nil && snapshot != nil:
 		// went live
