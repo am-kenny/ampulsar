@@ -16,7 +16,7 @@ func TestFileRoundTripSurvivesReopen(t *testing.T) {
 
 	s1 := mustNewFile(t, path)
 
-	want := domain.Session{StreamID: "s1", LiveMessage: domain.MessageRef{ID: "123", ChatID: "123"}, Title: "Factorio"}
+	want := domain.Session{StreamID: "s1", Title: "Factorio"}
 	mustSetSession(t, s1, want)
 
 	s2 := mustNewFile(t, path)

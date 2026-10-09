@@ -19,7 +19,7 @@ func TestMemoryGetEmptyReturnsNil(t *testing.T) {
 
 func TestMemorySetGetRoundTrip(t *testing.T) {
 	var s store.Store
-	want := domain.Session{StreamID: "s1", LiveMessage: domain.MessageRef{ID: "42", ChatID: "123"}, Title: "Factorio"}
+	want := domain.Session{StreamID: "s1", Title: "Factorio"}
 
 	mustSetSession(t, &s, want)
 

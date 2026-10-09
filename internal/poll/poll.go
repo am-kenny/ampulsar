@@ -135,13 +135,11 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 		return
 	}
 
-	session.LiveMessage = messageRef
-
 	d := domain.Delivery{
 		StreamID:      snapshot.StreamID,
 		Kind:          domain.DeliveryLive,
 		State:         domain.DeliveryPublished,
-		Ref:           session.LiveMessage,
+		Ref:           messageRef,
 		SyncedVersion: session.Version,
 	}
 
@@ -178,7 +176,7 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 	}
 
 	if p.config.Pin {
-		p.pinLive(ctx, session)
+		p.pinLive(ctx)
 	}
 
 	if p.config.EditOnChange {
@@ -187,14 +185,10 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 }
 
 // pinLive pins the message of type Live if it is not pinned yet
-func (p *Poller) pinLive(ctx context.Context, session *domain.Session) {
-	live, ok := p.liveDelivery(session)
+func (p *Poller) pinLive(ctx context.Context) {
+	live, ok := p.liveDelivery()
 
 	if !ok || live.Pinned {
-		return
-	}
-
-	if live.Pinned {
 		return
 	}
 
@@ -211,8 +205,8 @@ func (p *Poller) pinLive(ctx context.Context, session *domain.Session) {
 }
 
 // unpinLive unpins the message of type Live if it is pinned and reports whether it is left unpinned
-func (p *Poller) unpinLive(ctx context.Context, session *domain.Session) bool {
-	live, ok := p.liveDelivery(session)
+func (p *Poller) unpinLive(ctx context.Context) bool {
+	live, ok := p.liveDelivery()
 
 	if !ok || !live.Pinned {
 		return true
@@ -234,7 +228,7 @@ func (p *Poller) unpinLive(ctx context.Context, session *domain.Session) bool {
 
 // syncLive edits the message of type Live if it has an older version
 func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
-	live, ok := p.liveDelivery(session)
+	live, ok := p.liveDelivery()
 
 	if !ok || live.SyncedVersion == session.Version {
 		return
@@ -259,7 +253,7 @@ func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
 }
 
 // liveDelivery returns the stored delivery of type Live
-func (p *Poller) liveDelivery(session *domain.Session) (domain.Delivery, bool) {
+func (p *Poller) liveDelivery() (domain.Delivery, bool) {
 	for _, d := range p.store.GetDeliveries() {
 		if d.Kind == domain.DeliveryLive {
 			return d, true
@@ -333,7 +327,7 @@ func (p *Poller) finishSession(ctx context.Context, session *domain.Session) {
 	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
 
 	// the end action waits for the unpin, until the grace period is over
-	if !p.unpinLive(ctx, session) && !expired {
+	if !p.unpinLive(ctx) && !expired {
 		return
 	}
 
@@ -358,7 +352,7 @@ func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, 
 
 // endLive calls finalize and marks the message of type Live as done
 func (p *Poller) endLive(ctx context.Context, session *domain.Session) {
-	live, ok := p.liveDelivery(session)
+	live, ok := p.liveDelivery()
 
 	if !ok || live.State == domain.DeliveryDone {
 		return

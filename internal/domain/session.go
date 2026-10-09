@@ -17,7 +17,6 @@ type Session struct {
 	StreamID    string
 	State       SessionState
 	Version     int
-	LiveMessage MessageRef
 
 	Title string
 	Game  string
