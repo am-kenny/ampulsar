@@ -17,3 +17,12 @@ func (p EndPolicy) Valid() bool {
 	}
 	return false
 }
+
+// NeedsRecording returns true if the end action renders the offline message
+func (p EndPolicy) NeedsRecording() bool {
+	switch p {
+	case EndPolicyEditInPlace, EndPolicyNewMessage, EndPolicyReplace:
+		return true
+	}
+	return false
+}
