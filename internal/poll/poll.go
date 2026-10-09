@@ -97,7 +97,7 @@ func (p *Poller) Poll(ctx context.Context) {
 		// stream restarted between ticks
 		p.markEnded(session)
 		p.handleEnded(ctx, session)
-	case session.State == domain.SessionEnded, session.State == domain.SessionArchived:
+	case session.State != domain.SessionLive:
 		// waiting for recording or retrying end-of-stream delivery
 		p.handleEnded(ctx, session)
 	default:
@@ -274,8 +274,13 @@ func (p *Poller) liveDelivery(session *domain.Session) domain.Delivery {
 func (p *Poller) markEnded(session *domain.Session) {
 	slog.Info("poller: stream went offline")
 
-	session.State = domain.SessionEnded
 	session.EndedAt = p.now()
+
+	if p.config.WaitForRecording {
+		session.State = domain.SessionEnded
+	} else {
+		session.State = domain.SessionClosed
+	}
 
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err)
@@ -294,13 +299,8 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 		return
 	}
 
-	if !p.config.WaitForRecording {
-		p.finalizeOrGiveUp(ctx, session, expired)
-		return
-	}
-
-	if session.State == domain.SessionArchived {
-		// recording was found on an earlier tick, only the end action is left
+	if session.State == domain.SessionArchived || session.State == domain.SessionClosed {
+		// recording was found on an earlier tick or is not required
 		p.finalizeOrGiveUp(ctx, session, expired)
 		return
 	}
@@ -310,24 +310,27 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 	switch {
 	case errors.Is(err, domain.ErrNoRecordings):
 		slog.Debug("poller: source has no recordings, finalizing now", "platform", session.Platform)
+		session.State = domain.SessionClosed
 	case err != nil:
 		slog.Warn("poller: fetch recording failed", "err", err, "stream_id", session.StreamID)
 		if !expired {
 			return
 		}
+		session.State = domain.SessionClosed
 	case recording != nil:
 		session.Recording = *recording
 		session.Version++
 		session.State = domain.SessionArchived
-
-		if err := p.store.SetSession(*session); err != nil {
-			slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
-		}
 	case expired:
 		slog.Info("poller: recording grace expired", "stream_id", session.StreamID)
+		session.State = domain.SessionClosed
 	default:
 		// keep waiting
 		return
+	}
+
+	if err := p.store.SetSession(*session); err != nil {
+		slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
 	}
 
 	p.finalizeOrGiveUp(ctx, session, expired)
