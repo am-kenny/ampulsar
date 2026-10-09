@@ -125,6 +125,7 @@ func newPoller(src poll.Source, sink poll.Sink, st poll.Store, onEnd domain.EndP
 		poll.Config{
 			ChatID: "chat", Pin: pin, EditOnChange: editOnChange, OnEnd: onEnd,
 			Style: "default", Lang: "eng", EndGrace: 10 * time.Minute,
+			WaitForRecording: onEnd.NeedsRecording(),
 		},
 		poll.WithClock(func() time.Time { return testNow }),
 	)
@@ -137,14 +138,13 @@ func liveSnapshot() *domain.Snapshot {
 func liveSession() *domain.Session {
 	return &domain.Session{
 		Platform: domain.Twitch, ID: "u1",
-		Username:    "streamer",
-		StreamID:    "s1",
-		State:       domain.SessionLive,
-		Version:     1,
-		LiveMessage: domain.MessageRef{ID: "100", ChatID: "chat"},
-		Title:       "T",
-		Game:        "G",
-		URL:         "https://www.twitch.tv/streamer",
+		Username: "streamer",
+		StreamID: "s1",
+		State:    domain.SessionLive,
+		Version:  1,
+		Title:    "T",
+		Game:     "G",
+		URL:      "https://www.twitch.tv/streamer",
 	}
 }
 
@@ -285,6 +285,7 @@ func TestPoll(t *testing.T) {
 		{
 			name:            "offline replace delete fails does not post",
 			starting:        liveSession(),
+			deliveries:      []domain.Delivery{liveDeliveryAt(1)},
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyReplace,
 			deleteFails:     true,
@@ -295,6 +296,7 @@ func TestPoll(t *testing.T) {
 		{
 			name:            "offline replace send fails keeps session",
 			starting:        liveSession(),
+			deliveries:      []domain.Delivery{liveDeliveryAt(1)},
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyReplace,
 			sendFails:       true,
@@ -362,7 +364,12 @@ func TestPoll(t *testing.T) {
 			if tt.deleteFails {
 				sink.errOn["Delete"] = errors.New("boom")
 			}
-			st := newStore(t, tt.starting, tt.deliveries...)
+			deliveries := tt.deliveries
+			if tt.starting != nil && deliveries == nil {
+				// a stored session always comes with its live delivery
+				deliveries = []domain.Delivery{liveDeliveryAt(1)}
+			}
+			st := newStore(t, tt.starting, deliveries...)
 
 			newPoller(src, sink, st, tt.onEnd, tt.pin, false).Poll(context.Background())
 
@@ -472,17 +479,6 @@ func TestPollStreamInfoChange(t *testing.T) {
 			wantGame:      "G",
 			wantVersion:   2,
 			wantSynced:    2,
-		},
-		{
-			name:          "missing live delivery is rebuilt from session",
-			snapshot:      liveSnapshot(),
-			version:       1,
-			editOnChange:  true,
-			wantSinkCalls: []string{"Edit"},
-			wantTitle:     "T",
-			wantGame:      "G",
-			wantVersion:   1,
-			wantSynced:    1,
 		},
 	}
 
@@ -623,6 +619,7 @@ func TestPollRecording(t *testing.T) {
 		wantStored      bool
 		wantURL         string // expected stored recording URL, checked when the session is stored
 		wantVersion     int    // expected stored session version, checked when the session is stored
+		wantState       domain.SessionState
 	}{
 		{
 			name:            "found recording is stored when end action fails",
@@ -634,6 +631,7 @@ func TestPollRecording(t *testing.T) {
 			wantStored:      true,
 			wantURL:         "u",
 			wantVersion:     2,
+			wantState:       domain.SessionArchived,
 		},
 		{
 			name: "stored recording is not fetched again",
@@ -641,6 +639,7 @@ func TestPollRecording(t *testing.T) {
 				s := endedSession(5 * time.Minute)
 				s.Recording = domain.Recording{URL: "u"}
 				s.Version = 2
+				s.State = domain.SessionArchived
 				return s
 			}(),
 			wantSourceCalls: []string{"FetchStream"},
@@ -652,6 +651,7 @@ func TestPollRecording(t *testing.T) {
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
 			wantStored:      true,
 			wantVersion:     1,
+			wantState:       domain.SessionEnded,
 		},
 	}
 
@@ -663,7 +663,7 @@ func TestPollRecording(t *testing.T) {
 			if tt.editFails {
 				sink.errOn["Edit"] = errors.New("boom")
 			}
-			st := newStore(t, tt.starting)
+			st := newStore(t, tt.starting, liveDeliveryAt(1))
 
 			newPoller(src, sink, st, domain.EndPolicyEditInPlace, false, false).Poll(context.Background())
 
@@ -686,6 +686,9 @@ func TestPollRecording(t *testing.T) {
 			}
 			if s.Version != tt.wantVersion {
 				t.Errorf("version = %d, want %d", s.Version, tt.wantVersion)
+			}
+			if s.State != tt.wantState {
+				t.Errorf("state = %q, want %q", s.State, tt.wantState)
 			}
 		})
 	}

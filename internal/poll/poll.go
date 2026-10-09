@@ -32,13 +32,14 @@ type Store interface {
 }
 
 type Config struct {
-	ChatID       string
-	Pin          bool
-	EditOnChange bool
-	OnEnd        domain.EndPolicy
-	Style        string // Template style
-	Lang         string // Template language
-	EndGrace     time.Duration
+	ChatID           string
+	Pin              bool
+	EditOnChange     bool
+	OnEnd            domain.EndPolicy
+	Style            string // Template style
+	Lang             string // Template language
+	EndGrace         time.Duration
+	WaitForRecording bool
 }
 
 type Poller struct {
@@ -82,10 +83,6 @@ func (p *Poller) Poll(ctx context.Context) {
 
 	session := p.store.GetSession()
 
-	if session != nil && session.State == "" {
-		session.State = domain.SessionLive
-	}
-
 	switch {
 	case session == nil && snapshot != nil:
 		// went live
@@ -100,7 +97,7 @@ func (p *Poller) Poll(ctx context.Context) {
 		// stream restarted between ticks
 		p.markEnded(session)
 		p.handleEnded(ctx, session)
-	case session.State == domain.SessionEnded:
+	case session.State != domain.SessionLive:
 		// waiting for recording or retrying end-of-stream delivery
 		p.handleEnded(ctx, session)
 	default:
@@ -138,13 +135,11 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 		return
 	}
 
-	session.LiveMessage = messageRef
-
 	d := domain.Delivery{
 		StreamID:      snapshot.StreamID,
 		Kind:          domain.DeliveryLive,
 		State:         domain.DeliveryPublished,
-		Ref:           session.LiveMessage,
+		Ref:           messageRef,
 		SyncedVersion: session.Version,
 	}
 
@@ -181,7 +176,7 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 	}
 
 	if p.config.Pin {
-		p.pinLive(ctx, session)
+		p.pinLive(ctx)
 	}
 
 	if p.config.EditOnChange {
@@ -190,10 +185,10 @@ func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapsh
 }
 
 // pinLive pins the message of type Live if it is not pinned yet
-func (p *Poller) pinLive(ctx context.Context, session *domain.Session) {
-	live := p.liveDelivery(session)
+func (p *Poller) pinLive(ctx context.Context) {
+	live, ok := p.liveDelivery()
 
-	if live.Pinned {
+	if !ok || live.Pinned {
 		return
 	}
 
@@ -210,10 +205,10 @@ func (p *Poller) pinLive(ctx context.Context, session *domain.Session) {
 }
 
 // unpinLive unpins the message of type Live if it is pinned and reports whether it is left unpinned
-func (p *Poller) unpinLive(ctx context.Context, session *domain.Session) bool {
-	live := p.liveDelivery(session)
+func (p *Poller) unpinLive(ctx context.Context) bool {
+	live, ok := p.liveDelivery()
 
-	if !live.Pinned {
+	if !ok || !live.Pinned {
 		return true
 	}
 
@@ -233,9 +228,9 @@ func (p *Poller) unpinLive(ctx context.Context, session *domain.Session) bool {
 
 // syncLive edits the message of type Live if it has an older version
 func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
-	live := p.liveDelivery(session)
+	live, ok := p.liveDelivery()
 
-	if live.SyncedVersion == session.Version {
+	if !ok || live.SyncedVersion == session.Version {
 		return
 	}
 
@@ -258,99 +253,136 @@ func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
 }
 
 // liveDelivery returns the stored delivery of type Live
-func (p *Poller) liveDelivery(session *domain.Session) domain.Delivery {
+func (p *Poller) liveDelivery() (domain.Delivery, bool) {
 	for _, d := range p.store.GetDeliveries() {
 		if d.Kind == domain.DeliveryLive {
-			return d
+			return d, true
 		}
 	}
 
-	return domain.Delivery{
-		StreamID: session.StreamID,
-		Kind:     domain.DeliveryLive,
-		State:    domain.DeliveryPublished,
-		Ref:      session.LiveMessage,
-	}
+	return domain.Delivery{}, false
 }
 
 // markEnded marks the session as ended
 func (p *Poller) markEnded(session *domain.Session) {
 	slog.Info("poller: stream went offline")
 
-	session.State = domain.SessionEnded
 	session.EndedAt = p.now()
+
+	if p.config.WaitForRecording {
+		session.State = domain.SessionEnded
+	} else {
+		session.State = domain.SessionClosed
+	}
 
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err)
 	}
 }
 
-// handleEnded unpins the live message, fetches recording if required by end policy and calls p.finalizeOrGiveUp
-// this is the part that determines if grace threshold is reached
+// handleEnded waits for the recording while the session is ended, then finishes the session
 func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
-	slog.Debug("poller: ending session")
+	if session.State == domain.SessionEnded {
+		p.awaitRecording(ctx, session)
+	}
 
+	p.finishSession(ctx, session)
+}
+
+// awaitRecording fetches the recording and checks if the end grace is over
+func (p *Poller) awaitRecording(ctx context.Context, session *domain.Session) {
 	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
-
-	// the end action waits for the unpin, until the grace period is over
-	if !p.unpinLive(ctx, session) && !expired {
-		return
-	}
-
-	if p.config.OnEnd == domain.EndPolicyDelete || p.config.OnEnd == domain.EndPolicyNone {
-		p.finalizeOrGiveUp(ctx, session, expired)
-		return
-	}
-
-	if session.Recording.URL != "" {
-		// recording was found on an earlier tick, only the end action is left
-		p.finalizeOrGiveUp(ctx, session, expired)
-		return
-	}
 
 	recording, err := p.source.FetchRecording(ctx, p.channel, session.StreamID)
 
 	switch {
 	case errors.Is(err, domain.ErrNoRecordings):
 		slog.Debug("poller: source has no recordings, finalizing now", "platform", session.Platform)
+		session.State = domain.SessionClosed
 	case err != nil:
 		slog.Warn("poller: fetch recording failed", "err", err, "stream_id", session.StreamID)
 		if !expired {
 			return
 		}
+		session.State = domain.SessionClosed
 	case recording != nil:
 		session.Recording = *recording
 		session.Version++
-
-		if err := p.store.SetSession(*session); err != nil {
-			slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
-		}
+		session.State = domain.SessionArchived
 	case expired:
 		slog.Info("poller: recording grace expired", "stream_id", session.StreamID)
+		session.State = domain.SessionClosed
 	default:
 		// keep waiting
+		return
+	}
+
+	if err := p.store.SetSession(*session); err != nil {
+		slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
+	}
+}
+
+// finishSession unpins the live message and, once the wait for the recording is over, calls p.finalizeOrGiveUp
+func (p *Poller) finishSession(ctx context.Context, session *domain.Session) {
+	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
+
+	// the end action waits for the unpin, until the grace period is over
+	if !p.unpinLive(ctx) && !expired {
+		return
+	}
+
+	if session.State == domain.SessionEnded {
+		// waiting for the recording
 		return
 	}
 
 	p.finalizeOrGiveUp(ctx, session, expired)
 }
 
-// finalizeOrGiveUp calls finalize; calls closeSession if call succeeds or if grace period is expired
+// finalizeOrGiveUp calls endLive and closes session if all deliveries are done or if grace period is expired
 func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, expired bool) {
-	if err := p.finalize(ctx, session); err != nil {
-		slog.Warn("poller: finalize failed", "err", err)
-		if !expired {
-			return
-		}
+	p.endLive(ctx, session)
+
+	if !allDone(p.store.GetDeliveries()) && !expired {
+		return
 	}
 
 	p.closeSession()
 }
 
+// endLive calls finalize and marks the message of type Live as done
+func (p *Poller) endLive(ctx context.Context, session *domain.Session) {
+	live, ok := p.liveDelivery()
+
+	if !ok || live.State == domain.DeliveryDone {
+		return
+	}
+
+	if err := p.finalize(ctx, session, live); err != nil {
+		slog.Warn("poller: finalize failed", "err", err)
+		return
+	}
+
+	live.State = domain.DeliveryDone
+
+	if err := p.store.SaveDelivery(live); err != nil {
+		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+	}
+}
+
+// allDone returns true if every delivery is of state done
+func allDone(deliveries []domain.Delivery) bool {
+	for _, d := range deliveries {
+		if d.State != domain.DeliveryDone {
+			return false
+		}
+	}
+	return true
+}
+
 // finalize puts end policy into action
-func (p *Poller) finalize(ctx context.Context, session *domain.Session) error {
+func (p *Poller) finalize(ctx context.Context, session *domain.Session, live domain.Delivery) error {
 	cfg := p.config
-	live := p.liveDelivery(session)
 
 	switch cfg.OnEnd {
 	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage, domain.EndPolicyReplace:

@@ -14,10 +14,9 @@ const (
 type Session struct {
 	Channel
 
-	StreamID    string
-	State       SessionState
-	Version     int
-	LiveMessage MessageRef
+	StreamID string
+	State    SessionState
+	Version  int
 
 	Title string
 	Game  string
