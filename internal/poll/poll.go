@@ -32,13 +32,13 @@ type Store interface {
 }
 
 type Config struct {
-	ChatID       string
-	Pin          bool
-	EditOnChange bool
-	OnEnd        domain.EndPolicy
-	Style        string // Template style
-	Lang         string // Template language
-	EndGrace     time.Duration
+	ChatID           string
+	Pin              bool
+	EditOnChange     bool
+	OnEnd            domain.EndPolicy
+	Style            string // Template style
+	Lang             string // Template language
+	EndGrace         time.Duration
 	WaitForRecording bool
 }
 
@@ -97,7 +97,7 @@ func (p *Poller) Poll(ctx context.Context) {
 		// stream restarted between ticks
 		p.markEnded(session)
 		p.handleEnded(ctx, session)
-	case session.State == domain.SessionEnded:
+	case session.State == domain.SessionEnded, session.State == domain.SessionArchived:
 		// waiting for recording or retrying end-of-stream delivery
 		p.handleEnded(ctx, session)
 	default:
@@ -299,7 +299,7 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 		return
 	}
 
-	if session.Recording.URL != "" {
+	if session.State == domain.SessionArchived {
 		// recording was found on an earlier tick, only the end action is left
 		p.finalizeOrGiveUp(ctx, session, expired)
 		return
@@ -318,6 +318,7 @@ func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
 	case recording != nil:
 		session.Recording = *recording
 		session.Version++
+		session.State = domain.SessionArchived
 
 		if err := p.store.SetSession(*session); err != nil {
 			slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
