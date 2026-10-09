@@ -12,6 +12,7 @@ type DeliveryState string
 const (
 	DeliveryPublishing DeliveryState = "publishing"
 	DeliveryPublished  DeliveryState = "published"
+	DeliveryDone       DeliveryState = "done"
 )
 
 type Delivery struct {
