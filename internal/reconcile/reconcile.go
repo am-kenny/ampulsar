@@ -78,6 +78,10 @@ func (r *Reconciler) Sync(ctx context.Context) {
 		}
 		r.pinLive(ctx, &live)
 		r.syncLive(ctx, session, &live)
+	case !ok:
+		// the stream ended before it was announced
+	default:
+		r.endLive(ctx, session, &live)
 	}
 }
 
@@ -165,4 +169,86 @@ func (r *Reconciler) syncLive(ctx context.Context, session *domain.Session, live
 	if err := r.store.SaveDelivery(*live); err != nil {
 		slog.Warn("reconciler: save delivery failed", "err", err, "kind", live.Kind)
 	}
+}
+
+// endLive unpins the message of type Live and runs the end policy
+func (r *Reconciler) endLive(ctx context.Context, session *domain.Session, live *domain.Delivery) {
+	if live.State == domain.DeliveryDone {
+		return
+	}
+
+	if !r.unpinLive(ctx, live) {
+		return
+	}
+
+	if session.State == domain.SessionEnded {
+		// wait for the recording
+		return
+	}
+
+	if err := r.finalize(ctx, session, live); err != nil {
+		slog.Warn("reconciler: finalize failed", "err", err, "stream_id", live.StreamID)
+		return
+	}
+
+	live.State = domain.DeliveryDone
+
+	if err := r.store.SaveDelivery(*live); err != nil {
+		slog.Warn("reconciler: save delivery failed", "err", err, "kind", live.Kind)
+	}
+}
+// unpinLive unpins the message of type Live if configured
+func (r *Reconciler) unpinLive(ctx context.Context, live *domain.Delivery) bool {
+	if !live.Pinned {
+		return true
+	}
+
+	if err := r.sink.Unpin(ctx, live.Ref); err != nil {
+		slog.Warn("reconciler: unpin message failed", "err", err, "chat_id", live.Ref.ChatID)
+		return false
+	}
+
+	live.Pinned = false
+
+	if err := r.store.SaveDelivery(*live); err != nil {
+		slog.Warn("reconciler: save delivery failed", "err", err, "kind", live.Kind)
+	}
+
+	return true
+}
+
+// finalize runs end policy
+func (r *Reconciler) finalize(ctx context.Context, session *domain.Session, live *domain.Delivery) error {
+	cfg := r.config
+
+	switch cfg.OnEnd {
+	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage, domain.EndPolicyReplace:
+		streamEvent := message.StreamEvent{Session: *session, Timestamp: r.now().Unix()}
+
+		text, err := message.FormatWentOffline(cfg.Style, cfg.Lang, streamEvent)
+		if err != nil {
+			// formatting is deterministic
+			slog.Warn("reconciler: message formatting failed", "err", err, "stream_event", streamEvent)
+			return nil
+		}
+
+		switch cfg.OnEnd {
+		case domain.EndPolicyEditInPlace:
+			return r.sink.Edit(ctx, live.Ref, text)
+		case domain.EndPolicyReplace:
+			if err := r.sink.Delete(ctx, live.Ref); err != nil {
+				return err
+			}
+		}
+
+		_, err = r.sink.Send(ctx, cfg.ChatID, text)
+		return err
+
+	case domain.EndPolicyDelete:
+		return r.sink.Delete(ctx, live.Ref)
+	case domain.EndPolicyNone:
+		// no extra actions
+	}
+
+	return nil
 }
