@@ -2,9 +2,11 @@ package reconcile
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
+	"github.com/am-kenny/ampulsar/internal/message"
 )
 
 type Sink interface {
@@ -64,4 +66,60 @@ func (r *Reconciler) Sync(ctx context.Context) {
 	if session == nil {
 		return
 	}
+
+	_, ok := r.liveDelivery()
+
+	switch {
+	case session.State == domain.SessionLive && !ok:
+		r.publishLive(ctx, session)
+	}
+}
+
+// publishLive sends the message of type Live and pins it if configured
+func (r *Reconciler) publishLive(ctx context.Context, session *domain.Session) {
+	cfg := r.config
+
+	streamEvent := message.StreamEvent{Session: *session, Timestamp: r.now().Unix()}
+
+	text, err := message.FormatLive(cfg.Style, cfg.Lang, streamEvent)
+	if err != nil {
+		slog.Warn("reconciler: message formatting failed", "err", err, "stream_event", streamEvent)
+		return
+	}
+
+	messageRef, err := r.sink.Send(ctx, cfg.ChatID, text)
+	if err != nil {
+		slog.Warn("reconciler: message send failed", "err", err, "chat_id", cfg.ChatID)
+		return
+	}
+
+	d := domain.Delivery{
+		StreamID:      session.StreamID,
+		Kind:          domain.DeliveryLive,
+		State:         domain.DeliveryPublished,
+		Ref:           messageRef,
+		SyncedVersion: session.Version,
+	}
+
+	if cfg.Pin {
+		if err := r.sink.Pin(ctx, d.Ref); err != nil {
+			slog.Warn("reconciler: pin message failed", "err", err, "chat_id", cfg.ChatID)
+		} else {
+			d.Pinned = true
+		}
+	}
+
+	if err := r.store.SaveDelivery(d); err != nil {
+		slog.Warn("reconciler: save delivery failed", "err", err, "delivery", d)
+	}
+}
+// liveDelivery returns the stored delivery of type Live
+func (r *Reconciler) liveDelivery() (domain.Delivery, bool) {
+	for _, d := range r.store.GetDeliveries() {
+		if d.Kind == domain.DeliveryLive {
+			return d, true
+		}
+	}
+
+	return domain.Delivery{}, false
 }
