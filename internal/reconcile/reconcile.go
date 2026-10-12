@@ -38,6 +38,7 @@ type Reconciler struct {
 	store  Store
 	config Config
 	now    func() time.Time // function to retrieve current time
+	kick   chan struct{}
 }
 
 func NewReconciler(sink Sink, store Store, config Config, opts ...Option) *Reconciler {
@@ -46,6 +47,7 @@ func NewReconciler(sink Sink, store Store, config Config, opts ...Option) *Recon
 		store:  store,
 		config: config,
 		now:    time.Now,
+		kick:   make(chan struct{}, 1),
 	}
 
 	for _, opt := range opts {
@@ -59,6 +61,33 @@ type Option func(*Reconciler)
 
 func WithClock(now func() time.Time) Option {
 	return func(r *Reconciler) { r.now = now }
+}
+
+// Kick asks for a sync as soon as possible without blocking.
+func (r *Reconciler) Kick() {
+	select {
+	case r.kick <- struct{}{}:
+	default:
+	}
+}
+
+// Run syncs once, then on every interval or kick until ctx is done
+func (r *Reconciler) Run(ctx context.Context) {
+	r.Sync(ctx)
+
+	ticker := time.NewTicker(r.config.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-r.kick:
+		}
+
+		r.Sync(ctx)
+	}
 }
 
 func (r *Reconciler) Sync(ctx context.Context) {
