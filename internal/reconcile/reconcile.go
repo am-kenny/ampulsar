@@ -77,6 +77,7 @@ func (r *Reconciler) Sync(ctx context.Context) {
 			}
 		}
 		r.pinLive(ctx, &live)
+		r.syncLive(ctx, session, &live)
 	}
 }
 
@@ -140,4 +141,28 @@ func (r *Reconciler) liveDelivery() (domain.Delivery, bool) {
 	}
 
 	return domain.Delivery{}, false
+}
+
+// syncLive edits the message of type Live if it is older version than session and if live editing is enabled
+func (r *Reconciler) syncLive(ctx context.Context, session *domain.Session, live *domain.Delivery) {
+	if !r.config.EditOnChange || live.SyncedVersion == session.Version {
+		return
+	}
+
+	streamEvent := message.StreamEvent{Session: *session, Timestamp: r.now().Unix()}
+
+	text, err := message.FormatLive(r.config.Style, r.config.Lang, streamEvent)
+	if err != nil {
+		// formatting is deterministic, do not retry
+		slog.Warn("reconciler: message formatting failed", "err", err, "stream_event", streamEvent)
+	} else if err = r.sink.Edit(ctx, live.Ref, text); err != nil {
+		slog.Warn("reconciler: message live edit failed", "err", err, "chat_id", live.Ref.ChatID)
+		return
+	}
+
+	live.SyncedVersion = session.Version
+
+	if err := r.store.SaveDelivery(*live); err != nil {
+		slog.Warn("reconciler: save delivery failed", "err", err, "kind", live.Kind)
+	}
 }
