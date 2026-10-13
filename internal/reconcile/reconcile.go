@@ -226,6 +226,7 @@ func (r *Reconciler) endLive(ctx context.Context, session *domain.Session, live 
 		slog.Warn("reconciler: save delivery failed", "err", err, "kind", live.Kind)
 	}
 }
+
 // unpinLive unpins the message of type Live if configured
 func (r *Reconciler) unpinLive(ctx context.Context, live *domain.Delivery) bool {
 	if !live.Pinned {
