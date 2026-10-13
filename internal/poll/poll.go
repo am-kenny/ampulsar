@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
-	"github.com/am-kenny/ampulsar/internal/message"
 )
 
 type Source interface {
@@ -15,46 +14,29 @@ type Source interface {
 	FetchRecording(ctx context.Context, channel domain.Channel, streamID string) (*domain.Recording, error)
 }
 
-type Sink interface {
-	Send(ctx context.Context, chatID, text string) (domain.MessageRef, error)
-	Edit(ctx context.Context, ref domain.MessageRef, text string) error
-	Delete(ctx context.Context, ref domain.MessageRef) error
-	Pin(ctx context.Context, ref domain.MessageRef) error
-	Unpin(ctx context.Context, ref domain.MessageRef) error
-}
-
 type Store interface {
 	GetSession() *domain.Session
 	SetSession(domain.Session) error
 	DeleteSession() error
 	GetDeliveries() []domain.Delivery
-	SaveDelivery(domain.Delivery) error
 }
 
 type Config struct {
-	ChatID           string
-	Pin              bool
-	EditOnChange     bool
-	OnEnd            domain.EndPolicy
-	Style            string // Template style
-	Lang             string // Template language
 	EndGrace         time.Duration
 	WaitForRecording bool
 }
 
 type Poller struct {
 	source  Source
-	sink    Sink
 	store   Store
 	channel domain.Channel
 	config  Config
 	now     func() time.Time // function to retrieve current time
 }
 
-func NewPoller(source Source, sink Sink, store Store, channel domain.Channel, config Config, opts ...Option) *Poller {
+func NewPoller(source Source, store Store, channel domain.Channel, config Config, opts ...Option) *Poller {
 	p := &Poller{
 		source:  source,
-		sink:    sink,
 		store:   store,
 		channel: channel,
 		config:  config,
@@ -86,32 +68,31 @@ func (p *Poller) Poll(ctx context.Context) {
 	switch {
 	case session == nil && snapshot != nil:
 		// went live
-		p.startSession(ctx, snapshot)
+		p.startSession(snapshot)
 	case session == nil:
 		// offline and nothing to track
 	case session.State == domain.SessionLive && snapshot == nil:
 		// went offline
-		p.markEnded(session)
-		p.handleEnded(ctx, session)
+		p.endSession(ctx, session)
 	case session.State == domain.SessionLive && session.StreamID != snapshot.StreamID:
 		// stream restarted between ticks
-		p.markEnded(session)
-		p.handleEnded(ctx, session)
+		p.endSession(ctx, session)
+	case session.State == domain.SessionEnded:
+		// waiting for the recording
+		p.awaitRecording(ctx, session)
 	case session.State != domain.SessionLive:
-		// waiting for recording or retrying end-of-stream delivery
-		p.handleEnded(ctx, session)
+		// archived or closed, waiting for the end actions
+		p.closeSession(session)
 	default:
 		// still live with the same StreamID
-		p.handleLive(ctx, session, snapshot)
+		p.handleLive(session, snapshot)
 	}
 }
 
-func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
+func (p *Poller) startSession(snapshot *domain.Snapshot) {
 	slog.Info("poller: stream went live", "snapshot", snapshot)
 
-	cfg := p.config
-
-	session := &domain.Session{
+	p.save(&domain.Session{
 		Channel:  p.channel,
 		StreamID: snapshot.StreamID,
 		State:    domain.SessionLive,
@@ -119,174 +100,38 @@ func (p *Poller) startSession(ctx context.Context, snapshot *domain.Snapshot) {
 		Title:    snapshot.Title,
 		Game:     snapshot.Game,
 		URL:      snapshot.URL,
-	}
-
-	streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
-
-	text, err := message.FormatLive(cfg.Style, cfg.Lang, streamEvent)
-	if err != nil {
-		slog.Warn("poller: message formatting failed", "err", err, "stream_event", streamEvent)
-		return
-	}
-
-	messageRef, err := p.sink.Send(ctx, cfg.ChatID, text)
-	if err != nil {
-		slog.Warn("poller: message send failed", "err", err, "chat_id", cfg.ChatID)
-		return
-	}
-
-	d := domain.Delivery{
-		StreamID:      snapshot.StreamID,
-		Kind:          domain.DeliveryLive,
-		State:         domain.DeliveryPublished,
-		Ref:           messageRef,
-		SyncedVersion: session.Version,
-	}
-
-	if cfg.Pin {
-		if err := p.sink.Pin(ctx, d.Ref); err != nil {
-			slog.Warn("poller: pin message failed", "err", err, "chat_id", cfg.ChatID)
-		} else {
-			d.Pinned = true
-		}
-	}
-
-	if err := p.store.SetSession(*session); err != nil {
-		slog.Warn("poller: set session failed", "err", err)
-		return
-	}
-
-	if err = p.store.SaveDelivery(d); err != nil {
-		slog.Warn("poller: save delivery failed", "err", err, "delivery", d)
-	}
+	})
 }
 
-// handleLive applies session changes and syncs the message of type Live if configured
-func (p *Poller) handleLive(ctx context.Context, session *domain.Session, snapshot *domain.Snapshot) {
-	if session.Title != snapshot.Title || session.Game != snapshot.Game {
-		slog.Info("poller: stream info changed", "stream_id", session.StreamID, "title", snapshot.Title, "game", snapshot.Game)
-		session.Title = snapshot.Title
-		session.Game = snapshot.Game
-		session.Version++
-
-		if err := p.store.SetSession(*session); err != nil {
-			slog.Warn("poller: set session failed", "err", err, "session", session)
-			return
-		}
-	}
-
-	if p.config.Pin {
-		p.pinLive(ctx)
-	}
-
-	if p.config.EditOnChange {
-		p.syncLive(ctx, session)
-	}
-}
-
-// pinLive pins the message of type Live if it is not pinned yet
-func (p *Poller) pinLive(ctx context.Context) {
-	live, ok := p.liveDelivery()
-
-	if !ok || live.Pinned {
+// handleLive applies stream info changes to the session
+func (p *Poller) handleLive(session *domain.Session, snapshot *domain.Snapshot) {
+	if session.Title == snapshot.Title && session.Game == snapshot.Game {
 		return
 	}
 
-	if err := p.sink.Pin(ctx, live.Ref); err != nil {
-		slog.Warn("poller: pin message failed", "err", err, "chat_id", live.Ref.ChatID)
-		return
-	}
+	slog.Info("poller: stream info changed", "stream_id", session.StreamID, "title", snapshot.Title, "game", snapshot.Game)
+	session.Title = snapshot.Title
+	session.Game = snapshot.Game
+	session.Version++
 
-	live.Pinned = true
-
-	if err := p.store.SaveDelivery(live); err != nil {
-		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
-	}
+	p.save(session)
 }
 
-// unpinLive unpins the message of type Live if it is pinned and reports whether it is left unpinned
-func (p *Poller) unpinLive(ctx context.Context) bool {
-	live, ok := p.liveDelivery()
-
-	if !ok || !live.Pinned {
-		return true
-	}
-
-	if err := p.sink.Unpin(ctx, live.Ref); err != nil {
-		slog.Warn("poller: unpin message failed", "err", err, "chat_id", live.Ref.ChatID)
-		return false
-	}
-
-	live.Pinned = false
-
-	if err := p.store.SaveDelivery(live); err != nil {
-		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
-	}
-
-	return true
-}
-
-// syncLive edits the message of type Live if it has an older version
-func (p *Poller) syncLive(ctx context.Context, session *domain.Session) {
-	live, ok := p.liveDelivery()
-
-	if !ok || live.SyncedVersion == session.Version {
-		return
-	}
-
-	streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
-
-	text, err := message.FormatLive(p.config.Style, p.config.Lang, streamEvent)
-	if err != nil {
-		// formatting is deterministic, do not retry
-		slog.Warn("poller: message formatting failed", "err", err, "stream_event", streamEvent)
-	} else if err = p.sink.Edit(ctx, live.Ref, text); err != nil {
-		slog.Warn("poller: message live edit failed", "err", err, "chat_id", live.Ref.ChatID)
-		return
-	}
-
-	live.SyncedVersion = session.Version
-
-	if err := p.store.SaveDelivery(live); err != nil {
-		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
-	}
-}
-
-// liveDelivery returns the stored delivery of type Live
-func (p *Poller) liveDelivery() (domain.Delivery, bool) {
-	for _, d := range p.store.GetDeliveries() {
-		if d.Kind == domain.DeliveryLive {
-			return d, true
-		}
-	}
-
-	return domain.Delivery{}, false
-}
-
-// markEnded marks the session as ended
-func (p *Poller) markEnded(session *domain.Session) {
+// endSession marks the session as ended and looks for the recording right away if the end policy waits for it
+func (p *Poller) endSession(ctx context.Context, session *domain.Session) {
 	slog.Info("poller: stream went offline")
 
 	session.EndedAt = p.now()
 
-	if p.config.WaitForRecording {
-		session.State = domain.SessionEnded
-	} else {
+	if !p.config.WaitForRecording {
 		session.State = domain.SessionClosed
+		p.save(session)
+		return
 	}
 
-	if err := p.store.SetSession(*session); err != nil {
-		slog.Warn("poller: set session failed", "err", err)
-	}
-}
-
-// handleEnded waits for the recording while the session is ended, then finishes the session
-func (p *Poller) handleEnded(ctx context.Context, session *domain.Session) {
-	if session.State == domain.SessionEnded {
-		p.awaitRecording(ctx, session)
-	}
-
-	p.finishSession(ctx, session)
+	session.State = domain.SessionEnded
+	p.save(session)
+	p.awaitRecording(ctx, session)
 }
 
 // awaitRecording fetches the recording and checks if the end grace is over
@@ -317,56 +162,26 @@ func (p *Poller) awaitRecording(ctx context.Context, session *domain.Session) {
 		return
 	}
 
-	if err := p.store.SetSession(*session); err != nil {
-		slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
-	}
+	p.save(session)
 }
 
-// finishSession unpins the live message and, once the wait for the recording is over, calls p.finalizeOrGiveUp
-func (p *Poller) finishSession(ctx context.Context, session *domain.Session) {
+// closeSession deletes the session once all deliveries are done or the grace period is over
+func (p *Poller) closeSession(session *domain.Session) {
 	expired := p.now().Sub(session.EndedAt) >= p.config.EndGrace
-
-	// the end action waits for the unpin, until the grace period is over
-	if !p.unpinLive(ctx) && !expired {
-		return
-	}
-
-	if session.State == domain.SessionEnded {
-		// waiting for the recording
-		return
-	}
-
-	p.finalizeOrGiveUp(ctx, session, expired)
-}
-
-// finalizeOrGiveUp calls endLive and closes session if all deliveries are done or if grace period is expired
-func (p *Poller) finalizeOrGiveUp(ctx context.Context, session *domain.Session, expired bool) {
-	p.endLive(ctx, session)
 
 	if !allDone(p.store.GetDeliveries()) && !expired {
 		return
 	}
 
-	p.closeSession()
+	if err := p.store.DeleteSession(); err != nil {
+		slog.Warn("poller: delete session failed", "err", err)
+	}
 }
 
-// endLive calls finalize and marks the message of type Live as done
-func (p *Poller) endLive(ctx context.Context, session *domain.Session) {
-	live, ok := p.liveDelivery()
-
-	if !ok || live.State == domain.DeliveryDone {
-		return
-	}
-
-	if err := p.finalize(ctx, session, live); err != nil {
-		slog.Warn("poller: finalize failed", "err", err)
-		return
-	}
-
-	live.State = domain.DeliveryDone
-
-	if err := p.store.SaveDelivery(live); err != nil {
-		slog.Warn("poller: save delivery failed", "err", err, "kind", live.Kind)
+// save stores the session
+func (p *Poller) save(session *domain.Session) {
+	if err := p.store.SetSession(*session); err != nil {
+		slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
 	}
 }
 
@@ -378,45 +193,4 @@ func allDone(deliveries []domain.Delivery) bool {
 		}
 	}
 	return true
-}
-
-// finalize puts end policy into action
-func (p *Poller) finalize(ctx context.Context, session *domain.Session, live domain.Delivery) error {
-	cfg := p.config
-
-	switch cfg.OnEnd {
-	case domain.EndPolicyEditInPlace, domain.EndPolicyNewMessage, domain.EndPolicyReplace:
-		streamEvent := message.StreamEvent{Session: *session, Timestamp: p.now().Unix()}
-		text, err := message.FormatWentOffline(cfg.Style, cfg.Lang, streamEvent)
-		if err != nil {
-			// formatting is deterministic, do not retry
-			slog.Warn("poller: message formatting failed", "err", err, "stream_event", streamEvent)
-			return nil
-		}
-
-		switch cfg.OnEnd {
-		case domain.EndPolicyEditInPlace:
-			return p.sink.Edit(ctx, live.Ref, text)
-		case domain.EndPolicyReplace:
-			if err := p.sink.Delete(ctx, live.Ref); err != nil {
-				return err
-			}
-		}
-
-		_, err = p.sink.Send(ctx, cfg.ChatID, text)
-		return err
-
-	case domain.EndPolicyDelete:
-		return p.sink.Delete(ctx, live.Ref)
-	case domain.EndPolicyNone:
-		// No extra actions
-	}
-
-	return nil
-}
-
-func (p *Poller) closeSession() {
-	if err := p.store.DeleteSession(); err != nil {
-		slog.Warn("poller: delete session failed", "err", err)
-	}
 }
