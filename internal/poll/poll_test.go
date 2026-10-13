@@ -33,44 +33,6 @@ func (f *fakeSource) FetchRecording(_ context.Context, _ domain.Channel, _ strin
 	return f.recording, f.recordingErr
 }
 
-type fakeSink struct {
-	calls   []string
-	sendRef domain.MessageRef
-	errOn   map[string]error
-}
-
-func newFakeSink() *fakeSink {
-	return &fakeSink{sendRef: domain.MessageRef{ID: "100", ChatID: "chat"}}
-}
-
-func (f *fakeSink) record(method string) error {
-	f.calls = append(f.calls, method)
-	return f.errOn[method]
-}
-
-func (f *fakeSink) Send(_ context.Context, _, _ string) (domain.MessageRef, error) {
-	if err := f.record("Send"); err != nil {
-		return domain.MessageRef{}, err
-	}
-	return f.sendRef, nil
-}
-
-func (f *fakeSink) Edit(_ context.Context, _ domain.MessageRef, _ string) error {
-	return f.record("Edit")
-}
-
-func (f *fakeSink) Delete(_ context.Context, _ domain.MessageRef) error {
-	return f.record("Delete")
-}
-
-func (f *fakeSink) Pin(_ context.Context, _ domain.MessageRef) error {
-	return f.record("Pin")
-}
-
-func (f *fakeSink) Unpin(_ context.Context, _ domain.MessageRef) error {
-	return f.record("Unpin")
-}
-
 // newStore returns an in-memory store populated with session and deliveries
 func newStore(t *testing.T, session *domain.Session, deliveries ...domain.Delivery) *store.Store {
 	t.Helper()
@@ -92,20 +54,6 @@ func newStore(t *testing.T, session *domain.Session, deliveries ...domain.Delive
 	return st
 }
 
-// mustLiveDelivery returns the stored live delivery and fails the test if there is none
-func mustLiveDelivery(t *testing.T, st *store.Store) domain.Delivery {
-	t.Helper()
-
-	for _, d := range st.GetDeliveries() {
-		if d.Kind == domain.DeliveryLive {
-			return d
-		}
-	}
-
-	t.Fatal("no live delivery stored")
-	return domain.Delivery{}
-}
-
 // mustGetSession returns the stored session and fails the test if there is none
 func mustGetSession(t *testing.T, st *store.Store) *domain.Session {
 	t.Helper()
@@ -119,15 +67,13 @@ func mustGetSession(t *testing.T, st *store.Store) *domain.Session {
 
 var testNow = time.Date(2026, 9, 17, 20, 0, 0, 0, time.UTC)
 
-func newPoller(src poll.Source, sink poll.Sink, st poll.Store, onEnd domain.EndPolicy, pin, editOnChange bool) *poll.Poller {
-	return poll.NewPoller(src, sink, st,
+func newPoller(src poll.Source, st poll.Store, onEnd domain.EndPolicy, opts ...poll.Option) *poll.Poller {
+	opts = append(opts, poll.WithClock(func() time.Time { return testNow }))
+
+	return poll.NewPoller(src, st,
 		domain.Channel{Platform: domain.Twitch, ID: "u1", Username: "streamer"},
-		poll.Config{
-			ChatID: "chat", Pin: pin, EditOnChange: editOnChange, OnEnd: onEnd,
-			Style: "default", Lang: "eng", EndGrace: 10 * time.Minute,
-			WaitForRecording: onEnd.NeedsRecording(),
-		},
-		poll.WithClock(func() time.Time { return testNow }),
+		poll.Config{Interval: time.Minute, EndGrace: 10 * time.Minute, WaitForRecording: onEnd.NeedsRecording()},
+		opts...,
 	)
 }
 
@@ -155,6 +101,13 @@ func endedSession(ago time.Duration) *domain.Session {
 	return s
 }
 
+// finishedSession returns endedSession(ago) in the given state
+func finishedSession(state domain.SessionState, ago time.Duration) *domain.Session {
+	s := endedSession(ago)
+	s.State = state
+	return s
+}
+
 func liveDeliveryAt(version int) domain.Delivery {
 	return domain.Delivery{
 		StreamID:      "s1",
@@ -165,28 +118,24 @@ func liveDeliveryAt(version int) domain.Delivery {
 	}
 }
 
-func pinnedDeliveryAt(version int) domain.Delivery {
+func doneDeliveryAt(version int) domain.Delivery {
 	d := liveDeliveryAt(version)
-	d.Pinned = true
+	d.State = domain.DeliveryDone
 	return d
 }
 
 func TestPoll(t *testing.T) {
 	tests := []struct {
-		name        string
-		snapshot    *domain.Snapshot
-		recording   *domain.Recording
-		starting    *domain.Session
-		deliveries  []domain.Delivery
-		onEnd       domain.EndPolicy
-		pin         bool
-		sendFails   bool
-		deleteFails bool
+		name       string
+		snapshot   *domain.Snapshot
+		recording  *domain.Recording
+		starting   *domain.Session
+		deliveries []domain.Delivery
+		onEnd      domain.EndPolicy
 
 		wantSourceCalls []string
-		wantSinkCalls   []string
 		wantStored      bool
-		wantSynced      int
+		wantState       domain.SessionState // checked when the session is stored
 		recordingErr    error
 	}{
 		{
@@ -196,6 +145,7 @@ func TestPoll(t *testing.T) {
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream"},
 			wantStored:      true,
+			wantState:       domain.SessionLive,
 		},
 		{
 			name:            "stays offline",
@@ -207,73 +157,51 @@ func TestPoll(t *testing.T) {
 			snapshot:        liveSnapshot(),
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream"},
-			wantSinkCalls:   []string{"Send"},
 			wantStored:      true,
-			wantSynced:      1,
+			wantState:       domain.SessionLive,
 		},
 		{
-			name:            "went live with pin",
-			snapshot:        liveSnapshot(),
-			onEnd:           domain.EndPolicyEditInPlace,
-			pin:             true,
-			wantSourceCalls: []string{"FetchStream"},
-			wantSinkCalls:   []string{"Send", "Pin"},
-			wantStored:      true,
-			wantSynced:      1,
-		},
-		{
-			name:            "went live but send fails",
-			snapshot:        liveSnapshot(),
-			onEnd:           domain.EndPolicyEditInPlace,
-			sendFails:       true,
-			wantSourceCalls: []string{"FetchStream"},
-			wantSinkCalls:   []string{"Send"},
-		},
-		{
-			name:            "offline edit in place",
+			name:            "offline edit in place archives with recording",
 			starting:        liveSession(),
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantState:       domain.SessionArchived,
 		},
 		{
-			name:            "offline new message",
+			name:            "offline new message archives with recording",
 			starting:        liveSession(),
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyNewMessage,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Send"},
+			wantStored:      true,
+			wantState:       domain.SessionArchived,
 		},
 		{
-			name:            "offline delete",
+			name:            "offline delete closes without waiting",
 			starting:        liveSession(),
 			onEnd:           domain.EndPolicyDelete,
 			wantSourceCalls: []string{"FetchStream"},
-			wantSinkCalls:   []string{"Delete"},
+			wantStored:      true,
+			wantState:       domain.SessionClosed,
 		},
 		{
-			name:            "offline none",
+			name:            "offline none closes without waiting",
 			starting:        liveSession(),
 			onEnd:           domain.EndPolicyNone,
 			wantSourceCalls: []string{"FetchStream"},
+			wantStored:      true,
+			wantState:       domain.SessionClosed,
 		},
 		{
-			name:            "offline delete with pin unpins first",
-			starting:        liveSession(),
-			deliveries:      []domain.Delivery{pinnedDeliveryAt(1)},
-			onEnd:           domain.EndPolicyDelete,
-			pin:             true,
-			wantSourceCalls: []string{"FetchStream"},
-			wantSinkCalls:   []string{"Unpin", "Delete"},
-		},
-		{
-			name:            "offline replace deletes then posts",
+			name:            "offline replace archives with recording",
 			starting:        liveSession(),
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyReplace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Delete", "Send"},
+			wantStored:      true,
+			wantState:       domain.SessionArchived,
 		},
 		{
 			name:            "offline replace waits for recording",
@@ -281,28 +209,7 @@ func TestPoll(t *testing.T) {
 			onEnd:           domain.EndPolicyReplace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
 			wantStored:      true,
-		},
-		{
-			name:            "offline replace delete fails does not post",
-			starting:        liveSession(),
-			deliveries:      []domain.Delivery{liveDeliveryAt(1)},
-			recording:       &domain.Recording{URL: "u"},
-			onEnd:           domain.EndPolicyReplace,
-			deleteFails:     true,
-			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Delete"},
-			wantStored:      true,
-		},
-		{
-			name:            "offline replace send fails keeps session",
-			starting:        liveSession(),
-			deliveries:      []domain.Delivery{liveDeliveryAt(1)},
-			recording:       &domain.Recording{URL: "u"},
-			onEnd:           domain.EndPolicyReplace,
-			sendFails:       true,
-			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Delete", "Send"},
-			wantStored:      true,
+			wantState:       domain.SessionEnded,
 		},
 		{
 			name:            "offline no recording keeps session",
@@ -310,21 +217,24 @@ func TestPoll(t *testing.T) {
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
 			wantStored:      true,
+			wantState:       domain.SessionEnded,
 		},
 		{
-			name:            "offline source without recordings finalizes immediately",
+			name:            "offline source without recordings closes immediately",
 			starting:        liveSession(),
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantState:       domain.SessionClosed,
 			recordingErr:    domain.ErrNoRecordings,
 		},
 		{
-			name:            "ended past grace without recording finalizes",
+			name:            "ended past grace without recording closes",
 			starting:        endedSession(11 * time.Minute),
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantState:       domain.SessionClosed,
 		},
 		{
 			name:            "ended within grace with fetch error keeps session",
@@ -332,38 +242,70 @@ func TestPoll(t *testing.T) {
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
 			wantStored:      true,
+			wantState:       domain.SessionEnded,
 			recordingErr:    errors.New("unknown"),
 		},
 		{
-			name:            "ended past grace with fetch error finalizes",
+			name:            "ended past grace with fetch error closes",
 			starting:        endedSession(11 * time.Minute),
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantState:       domain.SessionClosed,
 			recordingErr:    errors.New("unknown"),
 		},
 		{
-			name:            "stream restarted finalizes old session",
+			name:            "stream restarted archives old session",
 			snapshot:        &domain.Snapshot{StreamID: "s2", Title: "T", Game: "G"},
 			starting:        liveSession(),
 			recording:       &domain.Recording{URL: "u"},
 			onEnd:           domain.EndPolicyEditInPlace,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantState:       domain.SessionArchived,
+		},
+		{
+			name:            "archived with every delivery done is deleted",
+			starting:        finishedSession(domain.SessionArchived, time.Minute),
+			deliveries:      []domain.Delivery{doneDeliveryAt(1)},
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+		},
+		{
+			name:            "closed without deliveries is deleted",
+			starting:        finishedSession(domain.SessionClosed, time.Minute),
+			deliveries:      []domain.Delivery{}, // not nil, so no live delivery is added
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+		},
+		{
+			name:            "archived with pending delivery within grace is kept",
+			starting:        finishedSession(domain.SessionArchived, time.Minute),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+			wantStored:      true,
+			wantState:       domain.SessionArchived,
+		},
+		{
+			name:            "closed with pending delivery past grace is deleted",
+			starting:        finishedSession(domain.SessionClosed, 11*time.Minute),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+		},
+		{
+			name:            "new stream waits until the finished session is deleted",
+			snapshot:        &domain.Snapshot{StreamID: "s2", Title: "T", Game: "G"},
+			starting:        finishedSession(domain.SessionArchived, time.Minute),
+			onEnd:           domain.EndPolicyEditInPlace,
+			wantSourceCalls: []string{"FetchStream"},
+			wantStored:      true,
+			wantState:       domain.SessionArchived,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			src := &fakeSource{snapshot: tt.snapshot, recording: tt.recording, recordingErr: tt.recordingErr}
-			sink := newFakeSink()
-			sink.errOn = map[string]error{}
-			if tt.sendFails {
-				sink.errOn["Send"] = errors.New("boom")
-			}
-			if tt.deleteFails {
-				sink.errOn["Delete"] = errors.New("boom")
-			}
 			deliveries := tt.deliveries
 			if tt.starting != nil && deliveries == nil {
 				// a stored session always comes with its live delivery
@@ -371,227 +313,10 @@ func TestPoll(t *testing.T) {
 			}
 			st := newStore(t, tt.starting, deliveries...)
 
-			newPoller(src, sink, st, tt.onEnd, tt.pin, false).Poll(context.Background())
+			newPoller(src, st, tt.onEnd).Poll(context.Background())
 
 			if !slices.Equal(src.calls, tt.wantSourceCalls) {
 				t.Errorf("source calls = %v, want %v", src.calls, tt.wantSourceCalls)
-			}
-			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
-				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
-			}
-			if got := st.GetSession() != nil; got != tt.wantStored {
-				t.Errorf("session stored = %v, want %v", got, tt.wantStored)
-			}
-			if tt.wantSynced != 0 {
-				live := mustLiveDelivery(t, st)
-				if live.SyncedVersion != tt.wantSynced {
-					t.Errorf("synced version = %d, want %d", live.SyncedVersion, tt.wantSynced)
-				}
-				if live.Pinned != tt.pin {
-					t.Errorf("pinned = %v, want %v", live.Pinned, tt.pin)
-				}
-			}
-		})
-	}
-}
-
-func TestPollStreamInfoChange(t *testing.T) {
-	tests := []struct {
-		name         string
-		snapshot     *domain.Snapshot
-		version      int               // starting session version
-		deliveries   []domain.Delivery // starting deliveries
-		editOnChange bool
-		editFails    bool
-
-		wantSinkCalls []string
-		wantTitle     string
-		wantGame      string
-		wantVersion   int
-		wantSynced    int // expected SyncedVersion for delivery of type Live , 0 = not checked
-	}{
-		{
-			name:         "unchanged and synced does nothing",
-			snapshot:     liveSnapshot(),
-			version:      1,
-			deliveries:   []domain.Delivery{liveDeliveryAt(1)},
-			editOnChange: true,
-			wantTitle:    "T",
-			wantGame:     "G",
-			wantVersion:  1,
-			wantSynced:   1,
-		},
-		{
-			name:          "title change edits live message",
-			snapshot:      &domain.Snapshot{StreamID: "s1", Title: "T2", Game: "G"},
-			version:       1,
-			deliveries:    []domain.Delivery{liveDeliveryAt(1)},
-			editOnChange:  true,
-			wantSinkCalls: []string{"Edit"},
-			wantTitle:     "T2",
-			wantGame:      "G",
-			wantVersion:   2,
-			wantSynced:    2,
-		},
-		{
-			name:          "game change edits live message",
-			snapshot:      &domain.Snapshot{StreamID: "s1", Title: "T", Game: "G2"},
-			version:       1,
-			deliveries:    []domain.Delivery{liveDeliveryAt(1)},
-			editOnChange:  true,
-			wantSinkCalls: []string{"Edit"},
-			wantTitle:     "T",
-			wantGame:      "G2",
-			wantVersion:   2,
-			wantSynced:    2,
-		},
-		{
-			name:        "change without edit on change only updates session",
-			snapshot:    &domain.Snapshot{StreamID: "s1", Title: "T2", Game: "G2"},
-			version:     1,
-			deliveries:  []domain.Delivery{liveDeliveryAt(1)},
-			wantTitle:   "T2",
-			wantGame:    "G2",
-			wantVersion: 2,
-			wantSynced:  1,
-		},
-		{
-			name:          "failed edit stores session and leaves delivery behind",
-			snapshot:      &domain.Snapshot{StreamID: "s1", Title: "T2", Game: "G"},
-			version:       1,
-			deliveries:    []domain.Delivery{liveDeliveryAt(1)},
-			editOnChange:  true,
-			editFails:     true,
-			wantSinkCalls: []string{"Edit"},
-			wantTitle:     "T2",
-			wantGame:      "G",
-			wantVersion:   2,
-			wantSynced:    1,
-		},
-		{
-			name:          "unchanged but delivery behind catches up",
-			snapshot:      liveSnapshot(),
-			version:       2,
-			deliveries:    []domain.Delivery{liveDeliveryAt(1)},
-			editOnChange:  true,
-			wantSinkCalls: []string{"Edit"},
-			wantTitle:     "T",
-			wantGame:      "G",
-			wantVersion:   2,
-			wantSynced:    2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			src := &fakeSource{snapshot: tt.snapshot}
-			sink := newFakeSink()
-			if tt.editFails {
-				sink.errOn = map[string]error{"Edit": errors.New("boom")}
-			}
-			session := liveSession()
-			session.Version = tt.version
-			st := newStore(t, session, tt.deliveries...)
-
-			newPoller(src, sink, st, domain.EndPolicyEditInPlace, false, tt.editOnChange).Poll(context.Background())
-
-			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
-				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
-			}
-
-			got := mustGetSession(t, st)
-			if got.Title != tt.wantTitle || got.Game != tt.wantGame {
-				t.Errorf("session title, game = %q, %q, want %q, %q", got.Title, got.Game, tt.wantTitle, tt.wantGame)
-			}
-			if got.Version != tt.wantVersion {
-				t.Errorf("session version = %d, want %d", got.Version, tt.wantVersion)
-			}
-			if synced := mustLiveDelivery(t, st).SyncedVersion; synced != tt.wantSynced {
-				t.Errorf("synced version = %d, want %d", synced, tt.wantSynced)
-			}
-		})
-	}
-}
-
-func TestPollPin(t *testing.T) {
-	tests := []struct {
-		name       string
-		snapshot   *domain.Snapshot
-		starting   *domain.Session
-		delivery   domain.Delivery
-		pin        bool
-		unpinFails bool
-
-		wantSinkCalls []string
-		wantStored    bool
-		wantPinned    bool // checked when the session is stored
-	}{
-		{
-			name:          "live and not pinned retries pin",
-			snapshot:      liveSnapshot(),
-			starting:      liveSession(),
-			delivery:      liveDeliveryAt(1),
-			pin:           true,
-			wantSinkCalls: []string{"Pin"},
-			wantStored:    true,
-			wantPinned:    true,
-		},
-		{
-			name:       "live and already pinned does nothing",
-			snapshot:   liveSnapshot(),
-			starting:   liveSession(),
-			delivery:   pinnedDeliveryAt(1),
-			pin:        true,
-			wantStored: true,
-			wantPinned: true,
-		},
-		{
-			name:          "offline unpins pinned message without pin config",
-			starting:      liveSession(),
-			delivery:      pinnedDeliveryAt(1),
-			wantSinkCalls: []string{"Unpin", "Edit"},
-		},
-		{
-			name:          "offline unpin fails holds end action",
-			starting:      liveSession(),
-			delivery:      pinnedDeliveryAt(1),
-			pin:           true,
-			unpinFails:    true,
-			wantSinkCalls: []string{"Unpin"},
-			wantStored:    true,
-			wantPinned:    true,
-		},
-		{
-			name:          "ended within grace retries unpin",
-			starting:      endedSession(5 * time.Minute),
-			delivery:      pinnedDeliveryAt(1),
-			pin:           true,
-			wantSinkCalls: []string{"Unpin", "Edit"},
-		},
-		{
-			name:          "ended past grace with unpin failing finalizes",
-			starting:      endedSession(11 * time.Minute),
-			delivery:      pinnedDeliveryAt(1),
-			pin:           true,
-			unpinFails:    true,
-			wantSinkCalls: []string{"Unpin", "Edit"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			src := &fakeSource{snapshot: tt.snapshot, recording: &domain.Recording{URL: "u"}}
-			sink := newFakeSink()
-			sink.errOn = map[string]error{}
-			if tt.unpinFails {
-				sink.errOn["Unpin"] = errors.New("boom")
-			}
-			st := newStore(t, tt.starting, tt.delivery)
-
-			newPoller(src, sink, st, domain.EndPolicyEditInPlace, tt.pin, false).Poll(context.Background())
-
-			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
-				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
 			}
 			if got := st.GetSession() != nil; got != tt.wantStored {
 				t.Fatalf("session stored = %v, want %v", got, tt.wantStored)
@@ -600,8 +325,134 @@ func TestPollPin(t *testing.T) {
 				return
 			}
 
-			if got := mustLiveDelivery(t, st).Pinned; got != tt.wantPinned {
-				t.Errorf("pinned = %v, want %v", got, tt.wantPinned)
+			if got := mustGetSession(t, st).State; got != tt.wantState {
+				t.Errorf("state = %q, want %q", got, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestPollStreamInfoChange(t *testing.T) {
+	tests := []struct {
+		name     string
+		snapshot *domain.Snapshot
+		version  int // starting session version
+
+		wantTitle   string
+		wantGame    string
+		wantVersion int
+	}{
+		{
+			name:        "unchanged does nothing",
+			snapshot:    liveSnapshot(),
+			version:     1,
+			wantTitle:   "T",
+			wantGame:    "G",
+			wantVersion: 1,
+		},
+		{
+			name:        "title change updates session",
+			snapshot:    &domain.Snapshot{StreamID: "s1", Title: "T2", Game: "G"},
+			version:     1,
+			wantTitle:   "T2",
+			wantGame:    "G",
+			wantVersion: 2,
+		},
+		{
+			name:        "game change updates session",
+			snapshot:    &domain.Snapshot{StreamID: "s1", Title: "T", Game: "G2"},
+			version:     1,
+			wantTitle:   "T",
+			wantGame:    "G2",
+			wantVersion: 2,
+		},
+		{
+			name:        "title and game change bump version once",
+			snapshot:    &domain.Snapshot{StreamID: "s1", Title: "T2", Game: "G2"},
+			version:     1,
+			wantTitle:   "T2",
+			wantGame:    "G2",
+			wantVersion: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &fakeSource{snapshot: tt.snapshot}
+			session := liveSession()
+			session.Version = tt.version
+			st := newStore(t, session, liveDeliveryAt(1))
+
+			newPoller(src, st, domain.EndPolicyEditInPlace).Poll(context.Background())
+
+			got := mustGetSession(t, st)
+			if got.Title != tt.wantTitle || got.Game != tt.wantGame {
+				t.Errorf("session title, game = %q, %q, want %q, %q", got.Title, got.Game, tt.wantTitle, tt.wantGame)
+			}
+			if got.Version != tt.wantVersion {
+				t.Errorf("session version = %d, want %d", got.Version, tt.wantVersion)
+			}
+		})
+	}
+}
+
+func TestPollKicks(t *testing.T) {
+	tests := []struct {
+		name      string
+		snapshot  *domain.Snapshot
+		recording *domain.Recording
+		starting  *domain.Session
+
+		wantKicks int
+	}{
+		{
+			name:      "went live kicks",
+			snapshot:  liveSnapshot(),
+			wantKicks: 1,
+		},
+		{
+			name:     "stays live does not kick",
+			snapshot: liveSnapshot(),
+			starting: liveSession(),
+		},
+		{
+			name:      "title change kicks",
+			snapshot:  &domain.Snapshot{StreamID: "s1", Title: "T2", Game: "G"},
+			starting:  liveSession(),
+			wantKicks: 1,
+		},
+		{
+			name:      "offline kicks",
+			starting:  liveSession(),
+			wantKicks: 1,
+		},
+		{
+			name:      "offline with recording kicks for ended and archived",
+			starting:  liveSession(),
+			recording: &domain.Recording{URL: "u"},
+			wantKicks: 2,
+		},
+		{
+			name:     "waiting for recording does not kick",
+			starting: endedSession(5 * time.Minute),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := &fakeSource{snapshot: tt.snapshot, recording: tt.recording}
+			var deliveries []domain.Delivery
+			if tt.starting != nil {
+				// a stored session always comes with its live delivery
+				deliveries = []domain.Delivery{liveDeliveryAt(1)}
+			}
+			st := newStore(t, tt.starting, deliveries...)
+
+			kicks := 0
+			newPoller(src, st, domain.EndPolicyEditInPlace, poll.WithKick(func() { kicks++ })).Poll(context.Background())
+
+			if kicks != tt.wantKicks {
+				t.Errorf("kicks = %d, want %d", kicks, tt.wantKicks)
 			}
 		})
 	}
@@ -612,22 +463,18 @@ func TestPollRecording(t *testing.T) {
 		name      string
 		starting  *domain.Session
 		recording *domain.Recording
-		editFails bool
 
 		wantSourceCalls []string
-		wantSinkCalls   []string
 		wantStored      bool
 		wantURL         string // expected stored recording URL, checked when the session is stored
 		wantVersion     int    // expected stored session version, checked when the session is stored
 		wantState       domain.SessionState
 	}{
 		{
-			name:            "found recording is stored when end action fails",
+			name:            "found recording is stored",
 			starting:        endedSession(5 * time.Minute),
 			recording:       &domain.Recording{URL: "u"},
-			editFails:       true,
 			wantSourceCalls: []string{"FetchStream", "FetchRecording"},
-			wantSinkCalls:   []string{"Edit"},
 			wantStored:      true,
 			wantURL:         "u",
 			wantVersion:     2,
@@ -643,7 +490,10 @@ func TestPollRecording(t *testing.T) {
 				return s
 			}(),
 			wantSourceCalls: []string{"FetchStream"},
-			wantSinkCalls:   []string{"Edit"},
+			wantStored:      true,
+			wantURL:         "u",
+			wantVersion:     2,
+			wantState:       domain.SessionArchived,
 		},
 		{
 			name:            "waiting for recording keeps version",
@@ -658,20 +508,12 @@ func TestPollRecording(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			src := &fakeSource{recording: tt.recording}
-			sink := newFakeSink()
-			sink.errOn = map[string]error{}
-			if tt.editFails {
-				sink.errOn["Edit"] = errors.New("boom")
-			}
 			st := newStore(t, tt.starting, liveDeliveryAt(1))
 
-			newPoller(src, sink, st, domain.EndPolicyEditInPlace, false, false).Poll(context.Background())
+			newPoller(src, st, domain.EndPolicyEditInPlace).Poll(context.Background())
 
 			if !slices.Equal(src.calls, tt.wantSourceCalls) {
 				t.Errorf("source calls = %v, want %v", src.calls, tt.wantSourceCalls)
-			}
-			if !slices.Equal(sink.calls, tt.wantSinkCalls) {
-				t.Errorf("sink calls = %v, want %v", sink.calls, tt.wantSinkCalls)
 			}
 			if got := st.GetSession() != nil; got != tt.wantStored {
 				t.Fatalf("session stored = %v, want %v", got, tt.wantStored)

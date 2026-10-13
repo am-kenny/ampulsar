@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
-	"time"
 
 	"github.com/adrg/xdg"
 
@@ -16,6 +16,7 @@ import (
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/poll"
+	"github.com/am-kenny/ampulsar/internal/reconcile"
 	"github.com/am-kenny/ampulsar/internal/store"
 	"github.com/am-kenny/ampulsar/internal/telegram"
 	"github.com/am-kenny/ampulsar/internal/tiktok"
@@ -67,34 +68,34 @@ func main() {
 	}
 	slog.Info("File store loaded successfully", "path", storePath, "has_session", st.GetSession() != nil)
 
-	ticker := time.NewTicker(cfg.Poll.Interval)
-
-	defer ticker.Stop()
+	reconciler := reconcile.NewReconciler(telegramSink, st, reconcile.Config{
+		ChatID:       cfg.Telegram.ChatID,
+		Pin:          cfg.Telegram.Pin,
+		EditOnChange: cfg.Telegram.EditOnChange,
+		OnEnd:        cfg.Telegram.OnEnd,
+		Style:        cfg.Template.Style,
+		Lang:         cfg.Template.Language,
+		Interval:     cfg.Reconcile.Interval,
+	})
 
 	pollCfg := poll.Config{
-		ChatID:           cfg.Telegram.ChatID,
-		Pin:              cfg.Telegram.Pin,
-		EditOnChange:     cfg.Telegram.EditOnChange,
-		OnEnd:            cfg.Telegram.OnEnd,
-		Style:            cfg.Template.Style,
-		Lang:             cfg.Template.Language,
+		Interval:         cfg.Poll.Interval,
 		EndGrace:         cfg.Poll.EndGrace,
 		WaitForRecording: cfg.Telegram.OnEnd.NeedsRecording(),
 	}
-	poller := poll.NewPoller(source, telegramSink, st, channel, pollCfg)
 
-	slog.Info("Starting poll", "channel", channel.Username)
-	poller.Poll(ctx)
+	poller := poll.NewPoller(source, st, channel, pollCfg,
+		poll.WithKick(reconciler.Kick),
+	)
 
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("Shutting down")
-			return
-		case <-ticker.C:
-			poller.Poll(ctx)
-		}
-	}
+	slog.Info("Starting poll and reconcile", "channel", channel.Username)
+
+	var wg sync.WaitGroup
+	wg.Go(func() { reconciler.Run(ctx) })
+	wg.Go(func() { poller.Run(ctx) })
+	wg.Wait()
+
+	slog.Info("Shutting down")
 }
 
 func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.Channel, error) {
