@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/adrg/xdg"
@@ -82,12 +83,17 @@ func main() {
 		EndGrace:         cfg.Poll.EndGrace,
 		WaitForRecording: cfg.Telegram.OnEnd.NeedsRecording(),
 	}
+
 	poller := poll.NewPoller(source, st, channel, pollCfg,
-		poll.WithKick(func() { reconciler.Sync(ctx) }),
+		poll.WithKick(reconciler.Kick),
 	)
 
-	slog.Info("Starting poll", "channel", channel.Username)
-	poller.Run(ctx)
+	slog.Info("Starting poll and reconcile", "channel", channel.Username)
+
+	var wg sync.WaitGroup
+	wg.Go(func() { reconciler.Run(ctx) })
+	wg.Go(func() { poller.Run(ctx) })
+	wg.Wait()
 
 	slog.Info("Shutting down")
 }

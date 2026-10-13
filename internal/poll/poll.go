@@ -66,7 +66,6 @@ func WithKick(kick func()) Option {
 // Run polls once, then on every interval until ctx is done
 func (p *Poller) Run(ctx context.Context) {
 	p.Poll(ctx)
-	p.kick()
 
 	ticker := time.NewTicker(p.config.Interval)
 	defer ticker.Stop()
@@ -77,7 +76,6 @@ func (p *Poller) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			p.Poll(ctx)
-			p.kick()
 		}
 	}
 }
@@ -209,6 +207,8 @@ func (p *Poller) save(session *domain.Session) {
 	if err := p.store.SetSession(*session); err != nil {
 		slog.Warn("poller: set session failed", "err", err, "stream_id", session.StreamID)
 	}
+
+	p.kick()
 }
 
 // allDone returns true if every delivery is of state done
