@@ -16,6 +16,7 @@ import (
 	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/poll"
+	"github.com/am-kenny/ampulsar/internal/reconcile"
 	"github.com/am-kenny/ampulsar/internal/store"
 	"github.com/am-kenny/ampulsar/internal/telegram"
 	"github.com/am-kenny/ampulsar/internal/tiktok"
@@ -71,20 +72,25 @@ func main() {
 
 	defer ticker.Stop()
 
+	reconciler := reconcile.NewReconciler(telegramSink, st, reconcile.Config{
+		ChatID:       cfg.Telegram.ChatID,
+		Pin:          cfg.Telegram.Pin,
+		EditOnChange: cfg.Telegram.EditOnChange,
+		OnEnd:        cfg.Telegram.OnEnd,
+		Style:        cfg.Template.Style,
+		Lang:         cfg.Template.Language,
+		Interval:     cfg.Reconcile.Interval,
+	})
+
 	pollCfg := poll.Config{
-		ChatID:           cfg.Telegram.ChatID,
-		Pin:              cfg.Telegram.Pin,
-		EditOnChange:     cfg.Telegram.EditOnChange,
-		OnEnd:            cfg.Telegram.OnEnd,
-		Style:            cfg.Template.Style,
-		Lang:             cfg.Template.Language,
 		EndGrace:         cfg.Poll.EndGrace,
 		WaitForRecording: cfg.Telegram.OnEnd.NeedsRecording(),
 	}
-	poller := poll.NewPoller(source, telegramSink, st, channel, pollCfg)
+	poller := poll.NewPoller(source, st, channel, pollCfg)
 
 	slog.Info("Starting poll", "channel", channel.Username)
 	poller.Poll(ctx)
+	reconciler.Sync(ctx)
 
 	for {
 		select {
@@ -93,6 +99,7 @@ func main() {
 			return
 		case <-ticker.C:
 			poller.Poll(ctx)
+			reconciler.Sync(ctx)
 		}
 	}
 }
