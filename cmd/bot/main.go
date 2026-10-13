@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/adrg/xdg"
 
@@ -68,10 +67,6 @@ func main() {
 	}
 	slog.Info("File store loaded successfully", "path", storePath, "has_session", st.GetSession() != nil)
 
-	ticker := time.NewTicker(cfg.Poll.Interval)
-
-	defer ticker.Stop()
-
 	reconciler := reconcile.NewReconciler(telegramSink, st, reconcile.Config{
 		ChatID:       cfg.Telegram.ChatID,
 		Pin:          cfg.Telegram.Pin,
@@ -83,25 +78,18 @@ func main() {
 	})
 
 	pollCfg := poll.Config{
+		Interval:         cfg.Poll.Interval,
 		EndGrace:         cfg.Poll.EndGrace,
 		WaitForRecording: cfg.Telegram.OnEnd.NeedsRecording(),
 	}
-	poller := poll.NewPoller(source, st, channel, pollCfg)
+	poller := poll.NewPoller(source, st, channel, pollCfg,
+		poll.WithKick(func() { reconciler.Sync(ctx) }),
+	)
 
 	slog.Info("Starting poll", "channel", channel.Username)
-	poller.Poll(ctx)
-	reconciler.Sync(ctx)
+	poller.Run(ctx)
 
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Info("Shutting down")
-			return
-		case <-ticker.C:
-			poller.Poll(ctx)
-			reconciler.Sync(ctx)
-		}
-	}
+	slog.Info("Shutting down")
 }
 
 func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.Channel, error) {

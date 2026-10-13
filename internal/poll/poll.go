@@ -22,6 +22,7 @@ type Store interface {
 }
 
 type Config struct {
+	Interval         time.Duration
 	EndGrace         time.Duration
 	WaitForRecording bool
 }
@@ -32,6 +33,7 @@ type Poller struct {
 	channel domain.Channel
 	config  Config
 	now     func() time.Time // function to retrieve current time
+	kick    func()
 }
 
 func NewPoller(source Source, store Store, channel domain.Channel, config Config, opts ...Option) *Poller {
@@ -41,6 +43,7 @@ func NewPoller(source Source, store Store, channel domain.Channel, config Config
 		channel: channel,
 		config:  config,
 		now:     time.Now,
+		kick:    func() {},
 	}
 
 	for _, opt := range opts {
@@ -54,6 +57,29 @@ type Option func(*Poller)
 
 func WithClock(now func() time.Time) Option {
 	return func(p *Poller) { p.now = now }
+}
+
+func WithKick(kick func()) Option {
+	return func(p *Poller) { p.kick = kick }
+}
+
+// Run polls once, then on every interval until ctx is done
+func (p *Poller) Run(ctx context.Context) {
+	p.Poll(ctx)
+	p.kick()
+
+	ticker := time.NewTicker(p.config.Interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.Poll(ctx)
+			p.kick()
+		}
+	}
 }
 
 func (p *Poller) Poll(ctx context.Context) {
