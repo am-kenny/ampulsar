@@ -91,6 +91,7 @@ Exactly one source must be enabled. Enabling both or neither fails bot at startu
 | `TEMPLATE_LANGUAGE` | no | `ru` | `eng` or `ru` |
 | `POLL_INTERVAL` | no | `1m` | Interval between each poll, for example `15s`, `2m30s` |
 | `POLL_END_GRACE` | no | `10m` | Wait period for a recording after a stream ends |
+| `RECONCILE_INTERVAL` | no | `1m` | Interval between retries of reconciler actions (send, edit, pin, unpin, end action) |
 | `STORE_PATH` | no | XDG state directory | State file location. Defaults to `/app/data/store.json` in Docker image |
 
 ## Messages
