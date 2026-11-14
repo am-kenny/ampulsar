@@ -1,3 +1,4 @@
+// Package health serves the liveness probe over HTTP.
 package health
 
 import (
@@ -15,14 +16,20 @@ const (
 	shutdownTimeout   = 5 * time.Second
 )
 
+// Check describes one loop that must keep running for the process to count as alive
+type Check struct {
+	Name   string
+	Last   func() time.Time // when the loop last finished a pass
+	MaxAge time.Duration    // how old Last may get before the check fails
+}
+
 type Server struct {
 	listener net.Listener
 	server   *http.Server
 }
 
 // Listen binds addr and returns a Server that answers the probes once Run is called.
-// ready is asked on every readiness probe.
-func Listen(addr string, ready func() bool) (*Server, error) {
+func Listen(addr string, checks ...Check) (*Server, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("listen on %q: %w", addr, err)
@@ -31,7 +38,7 @@ func Listen(addr string, ready func() bool) (*Server, error) {
 	return &Server{
 		listener: listener,
 		server: &http.Server{
-			Handler:           NewHandler(ready),
+			Handler:           NewHandler(checks, time.Now),
 			ReadHeaderTimeout: readHeaderTimeout,
 		},
 	}, nil
@@ -67,20 +74,27 @@ func (s *Server) Run(ctx context.Context) {
 }
 
 // NewHandler returns the probe routes
-// /livez answers 200 as long as the process serves HTTP,
+// /livez answers 200 while every check is fresh and 503 once one of them is stale
 // /readyz answers 200 once ready returns true and 503 before.
-func NewHandler(ready func() bool) http.Handler {
+func NewHandler(checks []Check, now func() time.Time) http.Handler {
+	started := now()
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
-		respond(w, http.StatusOK, "ok")
-	})
+		for _, check := range checks {
+			last := check.Last()
+			if last.IsZero() {
+				last = started
+			}
 
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
-		if !ready() {
-			respond(w, http.StatusServiceUnavailable, "not ready")
-			return
+			if age := now().Sub(last); age > check.MaxAge {
+				slog.Warn("health: check is stale", "check", check.Name, "age", age, "max_age", check.MaxAge)
+				respond(w, http.StatusServiceUnavailable, "stale: "+check.Name)
+				return
+			}
 		}
+
 		respond(w, http.StatusOK, "ok")
 	})
 
