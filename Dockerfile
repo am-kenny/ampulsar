@@ -24,6 +24,7 @@ WORKDIR /app
 
 ENV STORE_PATH=/app/data/store.json
 
+EXPOSE 8081
 
 COPY --from=builder --chown=nonroot:nonroot /app/data /app/data
 COPY --from=builder /app/ampulsar /app/ampulsar

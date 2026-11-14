@@ -93,6 +93,11 @@ Exactly one source must be enabled. Enabling both or neither fails bot at startu
 | `POLL_END_GRACE` | no | `10m` | Wait period for a recording after a stream ends |
 | `RECONCILE_INTERVAL` | no | `1m` | Interval between retries of reconciler actions (send, edit, pin, unpin, end action) |
 | `STORE_PATH` | no | XDG state directory | State file location. Defaults to `/app/data/store.json` in Docker image |
+| `HEALTH_ADDR` | no | `:8081` | Listen address of the health endpoint |
+
+### Health endpoint
+
+`GET /livez` answers `200` while the poll and reconcile loops keep running.
 
 ## Messages
 
@@ -124,6 +129,7 @@ Titles are HTML escaped, so characters like `<` and `&` cannot break the message
 - [x] **TikTok source**
 - [x] **File persistence**, restart safe mid-stream
 - [x] **Live message editing** when the broadcast data changes
+- [x] **Health endpoint**
 - [ ] **Discord destination** (partially done)
 - [ ] **Several destinations at once**
 - [ ] **YouTube source**
