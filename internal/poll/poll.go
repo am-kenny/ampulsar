@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
@@ -34,6 +35,7 @@ type Poller struct {
 	config  Config
 	now     func() time.Time // function to retrieve current time
 	kick    func()
+	lastPoll atomic.Int64 // unix nanoseconds, 0 before the first poll
 }
 
 func NewPoller(source Source, store Store, channel domain.Channel, config Config, opts ...Option) *Poller {
@@ -80,7 +82,19 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 }
 
+// LastPoll returns unix time when the last poll finished.
+// Returns zero before the first poll.
+func (p *Poller) LastPoll() time.Time {
+	nanos := p.lastPoll.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
+}
+
 func (p *Poller) Poll(ctx context.Context) {
+	defer func() { p.lastPoll.Store(p.now().UnixNano()) }()
+
 	snapshot, err := p.source.FetchStream(ctx, p.channel)
 	if err != nil {
 		slog.Error("poller: fetch stream failed", "err", err, "channel", p.channel.Username)

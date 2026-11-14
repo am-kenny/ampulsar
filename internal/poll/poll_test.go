@@ -15,6 +15,7 @@ import (
 type fakeSource struct {
 	calls        []string
 	snapshot     *domain.Snapshot
+	streamErr    error
 	recording    *domain.Recording
 	recordingErr error
 }
@@ -25,7 +26,7 @@ func (f *fakeSource) record(method string) {
 
 func (f *fakeSource) FetchStream(_ context.Context, _ domain.Channel) (*domain.Snapshot, error) {
 	f.record("FetchStream")
-	return f.snapshot, nil
+	return f.snapshot, f.streamErr
 }
 
 func (f *fakeSource) FetchRecording(_ context.Context, _ domain.Channel, _ string) (*domain.Recording, error) {
@@ -531,6 +532,33 @@ func TestPollRecording(t *testing.T) {
 			}
 			if s.State != tt.wantState {
 				t.Errorf("state = %q, want %q", s.State, tt.wantState)
+			}
+		})
+	}
+}
+
+func TestLastPoll(t *testing.T) {
+	tests := []struct {
+		name      string
+		streamErr error
+	}{
+		{"after a successful poll", nil},
+		{"after a failed poll", errors.New("source unavailable")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := &fakeSource{streamErr: tt.streamErr}
+			p := newPoller(source, newStore(t, nil), domain.EndPolicyNone)
+
+			if got := p.LastPoll(); !got.IsZero() {
+				t.Fatalf("LastPoll() = %v before the first poll, want zero time", got)
+			}
+
+			p.Poll(context.Background())
+
+			if got := p.LastPoll(); !got.Equal(testNow) {
+				t.Errorf("LastPoll() = %v, want %v", got, testNow)
 			}
 		})
 	}
