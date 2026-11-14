@@ -8,10 +8,12 @@ RUN go mod download
 
 COPY . .
 
+ARG VERSION=dev
+
 # Build a static binary with stripped paths and debug
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
-    -ldflags="-w -s" \
+    -ldflags="-w -s -X main.version=${VERSION}" \
     -o /app/ampulsar \
     ./cmd/bot
 
