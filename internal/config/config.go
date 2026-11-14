@@ -225,6 +225,22 @@ func (cnf *StoreConfig) fields() []fieldSpec {
 	}
 }
 
+type HealthConfig struct {
+	Addr string
+}
+
+// fields returns list of fieldSpec, holding env definitions
+// and pointers into the HealthConfig for env loading
+func (cnf *HealthConfig) fields() []fieldSpec {
+	return []fieldSpec{
+		{"HEALTH_ADDR", parseString(&cnf.Addr), false},
+	}
+}
+
+func (cnf *HealthConfig) defaults() {
+	cnf.Addr = ":8081"
+}
+
 type Config struct {
 	Twitch    TwitchConfig
 	TikTok    TikTokConfig
@@ -234,6 +250,7 @@ type Config struct {
 	Poll      PollConfig
 	Reconcile ReconcileConfig
 	Store     StoreConfig
+	Health    HealthConfig
 }
 
 func (cfg *Config) sections() []section {
@@ -246,6 +263,7 @@ func (cfg *Config) sections() []section {
 		&cfg.Poll,
 		&cfg.Reconcile,
 		&cfg.Store,
+		&cfg.Health,
 	}
 }
 
