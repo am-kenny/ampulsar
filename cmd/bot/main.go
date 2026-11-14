@@ -9,11 +9,13 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/adrg/xdg"
 
 	"github.com/am-kenny/ampulsar/internal/config"
 	"github.com/am-kenny/ampulsar/internal/domain"
+	"github.com/am-kenny/ampulsar/internal/health"
 	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/poll"
 	"github.com/am-kenny/ampulsar/internal/reconcile"
@@ -88,9 +90,20 @@ func main() {
 		poll.WithKick(reconciler.Kick),
 	)
 
+	healthServer, err := health.Listen(cfg.Health.Addr,
+		health.Check{Name: "poller", Last: poller.LastPoll, MaxAge: maxAge(cfg.Poll.Interval)},
+		health.Check{Name: "reconciler", Last: reconciler.LastSync, MaxAge: maxAge(cfg.Reconcile.Interval)},
+	)
+	if err != nil {
+		slog.Error("health server init failed", "err", err, "addr", cfg.Health.Addr)
+		os.Exit(1)
+	}
+	slog.Info("Health server listening", "addr", healthServer.Addr())
+
 	slog.Info("Starting poll and reconcile", "channel", channel.Username)
 
 	var wg sync.WaitGroup
+	wg.Go(func() { healthServer.Run(ctx) })
 	wg.Go(func() { reconciler.Run(ctx) })
 	wg.Go(func() { poller.Run(ctx) })
 	wg.Wait()
@@ -119,4 +132,9 @@ func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.C
 	default:
 		return nil, domain.Channel{}, errors.New("no source platform configured")
 	}
+}
+
+// maxAge returns how long a loop may go without finishing before it counts as stuck
+func maxAge(interval time.Duration) time.Duration {
+	return 3*interval + 5*time.Minute
 }
