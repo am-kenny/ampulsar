@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/am-kenny/ampulsar/internal/domain"
@@ -34,11 +35,12 @@ type Config struct {
 }
 
 type Reconciler struct {
-	sink   Sink
-	store  Store
-	config Config
-	now    func() time.Time // function to retrieve current time
-	kick   chan struct{}
+	sink     Sink
+	store    Store
+	config   Config
+	now      func() time.Time // function to retrieve current time
+	kick     chan struct{}
+	lastSync atomic.Int64 // unix nanoseconds, 0 before the first sync
 }
 
 func NewReconciler(sink Sink, store Store, config Config, opts ...Option) *Reconciler {
@@ -90,7 +92,19 @@ func (r *Reconciler) Run(ctx context.Context) {
 	}
 }
 
+// LastSync returns unix time when the last sync finished.
+// Returns the zero before the first sync.
+func (r *Reconciler) LastSync() time.Time {
+	nanos := r.lastSync.Load()
+	if nanos == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nanos)
+}
+
 func (r *Reconciler) Sync(ctx context.Context) {
+	defer func() { r.lastSync.Store(r.now().UnixNano()) }()
+
 	session := r.store.GetSession()
 	if session == nil {
 		return

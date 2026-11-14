@@ -636,3 +636,17 @@ func TestRunSyncsOnKick(t *testing.T) {
 		t.Fatal("Run did not return after cancel")
 	}
 }
+
+func TestLastSync(t *testing.T) {
+	r := newReconciler(newFakeSink(), newStore(t, nil), domain.EndPolicyNone, false, false)
+
+	if got := r.LastSync(); !got.IsZero() {
+		t.Fatalf("LastSync() = %v before the first sync, want zero time", got)
+	}
+
+	r.Sync(context.Background())
+
+	if got := r.LastSync(); !got.Equal(testNow) {
+		t.Errorf("LastSync() = %v, want %v", got, testNow)
+	}
+}
