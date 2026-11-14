@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/disgoorg/disgo v0.19.6
+	github.com/disgoorg/disgo v0.20.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/google/renameio/v2 v2.0.2
 )
