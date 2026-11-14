@@ -19,7 +19,7 @@ const (
 // Check describes one loop that must keep running for the process to count as alive
 type Check struct {
 	Name   string
-	Last   func() time.Time // when the loop last finished a pass
+	Last   func() time.Time // when the loop last finished a pass, zero before the first run
 	MaxAge time.Duration    // how old Last may get before the check fails
 }
 
@@ -28,7 +28,7 @@ type Server struct {
 	server   *http.Server
 }
 
-// Listen binds addr and returns a Server that answers the probes once Run is called.
+// Listen binds addr and returns a Server that answers the probe once Run is called.
 func Listen(addr string, checks ...Check) (*Server, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -74,8 +74,7 @@ func (s *Server) Run(ctx context.Context) {
 }
 
 // NewHandler returns the probe routes
-// /livez answers 200 while every check is fresh and 503 once one of them is stale
-// /readyz answers 200 once ready returns true and 503 before.
+// /livez answers 200 while every check is fresh and 503 once one of them is stale.
 func NewHandler(checks []Check, now func() time.Time) http.Handler {
 	started := now()
 

@@ -29,12 +29,12 @@ type Config struct {
 }
 
 type Poller struct {
-	source  Source
-	store   Store
-	channel domain.Channel
-	config  Config
-	now     func() time.Time // function to retrieve current time
-	kick    func()
+	source   Source
+	store    Store
+	channel  domain.Channel
+	config   Config
+	now      func() time.Time // function to retrieve current time
+	kick     func()
 	lastPoll atomic.Int64 // unix nanoseconds, 0 before the first poll
 }
 

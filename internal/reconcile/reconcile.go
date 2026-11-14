@@ -93,7 +93,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 }
 
 // LastSync returns unix time when the last sync finished.
-// Returns the zero before the first sync.
+// Returns zero before the first sync.
 func (r *Reconciler) LastSync() time.Time {
 	nanos := r.lastSync.Load()
 	if nanos == 0 {
