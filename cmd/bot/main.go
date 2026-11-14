@@ -25,8 +25,10 @@ import (
 	"github.com/am-kenny/ampulsar/internal/twitch"
 )
 
+var version = "dev"
+
 func main() {
-	slog.Info("Starting AmPulsar")
+	slog.Info("Starting AmPulsar", "version", version)
 	slog.Info("Loading config")
 
 	cfg, err := config.Load()
