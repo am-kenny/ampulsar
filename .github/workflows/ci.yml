@@ -75,9 +75,9 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=sha,format=short
+            type=edge
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
@@ -97,5 +97,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
