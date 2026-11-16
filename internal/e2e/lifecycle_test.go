@@ -21,6 +21,10 @@ type source struct {
 	recording *domain.Recording
 }
 
+func (s *source) ResolveChannel(_ context.Context, _ string) (domain.Channel, error) {
+	return channel, nil
+}
+
 func (s *source) FetchStream(_ context.Context, _ domain.Channel) (*domain.Snapshot, error) {
 	return s.snapshot, nil
 }
@@ -180,7 +184,7 @@ func newScenario(t *testing.T, onEnd domain.EndPolicy) *scenario {
 		reconcile.WithClock(clock),
 	)
 
-	sc.poller = poll.NewPoller(sc.source, sc.store, channel,
+	sc.poller = poll.NewPoller(sc.source, sc.store, channel.Username,
 		poll.Config{Interval: time.Minute, EndGrace: endGrace, WaitForRecording: onEnd.NeedsRecording()},
 		poll.WithClock(clock),
 	)
