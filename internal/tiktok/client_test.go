@@ -57,6 +57,20 @@ func respond(t *testing.T, status int, body string) *tiktok.Client {
 	})
 }
 
+func blockUntilDone(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	return func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+}
+
 func TestFetchProfileHappyPath(t *testing.T) {
 	c := respond(t, http.StatusOK, profile)
 
@@ -171,6 +185,20 @@ func TestUserRequestCarriesParams(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(liveRoom))
 	})
+
+	if _, err := c.FetchUserByUsername(context.Background(), username); err != nil {
+		t.Fatalf("FetchUserByUsername: %v", err)
+	}
+}
+
+func TestUserAgentOverride(t *testing.T) {
+	ua := tiktok.UserAgent("v1.2.3")
+	c := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.UserAgent(); got != ua {
+			t.Errorf("User-Agent = %q, want %q", got, ua)
+		}
+		_, _ = w.Write([]byte(liveRoom))
+	}, tiktok.WithUserAgent(ua))
 
 	if _, err := c.FetchUserByUsername(context.Background(), username); err != nil {
 		t.Fatalf("FetchUserByUsername: %v", err)
@@ -345,30 +373,13 @@ func TestCancelledContextAborts(t *testing.T) {
 	}
 }
 
-func blockUntilDone(t *testing.T) http.HandlerFunc {
-	t.Helper()
-
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-
-	return func(_ http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
+func TestUserAgent(t *testing.T) {
+	for version, want := range map[string]string{
+		"":       "AmPulsar (+https://github.com/am-kenny/ampulsar)",
+		"v1.2.3": "AmPulsar/v1.2.3 (+https://github.com/am-kenny/ampulsar)",
+	} {
+		if got := tiktok.UserAgent(version); got != want {
+			t.Errorf("UserAgent(%q) = %q, want %q", version, got, want)
 		}
-	}
-}
-
-func TestUserAgentOverride(t *testing.T) {
-	const ua = "AmPulsar/1.2.3 (+https://github.com/am-kenny/ampulsar)"
-	c := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if got := r.UserAgent(); got != ua {
-			t.Errorf("User-Agent = %q, want %q", got, ua)
-		}
-		_, _ = w.Write([]byte(liveRoom))
-	}, tiktok.WithUserAgent(ua))
-
-	if _, err := c.FetchUserByUsername(context.Background(), username); err != nil {
-		t.Fatalf("FetchUserByUsername: %v", err)
 	}
 }
