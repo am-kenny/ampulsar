@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 )
 
 type Source interface {
+	ResolveChannel(ctx context.Context, username string) (domain.Channel, error)
 	FetchStream(ctx context.Context, channel domain.Channel) (*domain.Snapshot, error)
 	FetchRecording(ctx context.Context, channel domain.Channel, streamID string) (*domain.Recording, error)
 }
@@ -31,21 +33,24 @@ type Config struct {
 type Poller struct {
 	source   Source
 	store    Store
-	channel  domain.Channel
+	username string
+	channel  domain.Channel // valid once resolved is true
+	resolved bool
+	failing  bool // the last resolve attempt failed
 	config   Config
 	now      func() time.Time // function to retrieve current time
 	kick     func()
 	lastPoll atomic.Int64 // unix nanoseconds, 0 before the first poll
 }
 
-func NewPoller(source Source, store Store, channel domain.Channel, config Config, opts ...Option) *Poller {
+func NewPoller(source Source, store Store, username string, config Config, opts ...Option) *Poller {
 	p := &Poller{
-		source:  source,
-		store:   store,
-		channel: channel,
-		config:  config,
-		now:     time.Now,
-		kick:    func() {},
+		source:   source,
+		store:    store,
+		username: username,
+		config:   config,
+		now:      time.Now,
+		kick:     func() {},
 	}
 
 	for _, opt := range opts {
@@ -95,6 +100,10 @@ func (p *Poller) LastPoll() time.Time {
 func (p *Poller) Poll(ctx context.Context) {
 	defer func() { p.lastPoll.Store(p.now().UnixNano()) }()
 
+	if !p.resolve(ctx) {
+		return
+	}
+
 	snapshot, err := p.source.FetchStream(ctx, p.channel)
 	if err != nil {
 		slog.Error("poller: fetch stream failed", "err", err, "channel", p.channel.Username)
@@ -125,6 +134,37 @@ func (p *Poller) Poll(ctx context.Context) {
 		// still live with the same StreamID
 		p.handleLive(session, snapshot)
 	}
+}
+
+// resolve looks the channel up until it succeeds once.
+// A banned, deleted or renamed channel does not stop the bot, it is retried on every poll.
+func (p *Poller) resolve(ctx context.Context) bool {
+	if p.resolved {
+		return true
+	}
+
+	ch, err := p.source.ResolveChannel(ctx, p.username)
+	if err == nil {
+		if p.failing {
+			slog.Info("poller: channel available again", "channel", ch.Username)
+		}
+		p.channel, p.resolved, p.failing = ch, true, false
+		return true
+	}
+
+	if !p.failing {
+		slog.Warn("poller: channel unavailable, retrying every poll", "channel", p.username, "err", err)
+		p.failing = true
+	} else {
+		slog.Debug("poller: channel still unavailable", "channel", p.username, "err", err)
+	}
+
+	if session := p.store.GetSession(); session != nil && strings.EqualFold(session.Username, p.username) {
+		p.channel = session.Channel
+		return true
+	}
+
+	return false
 }
 
 func (p *Poller) startSession(snapshot *domain.Snapshot) {
