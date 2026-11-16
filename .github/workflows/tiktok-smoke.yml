@@ -1,0 +1,42 @@
+name: TikTok smoke test
+
+# Checks that the TikTok client can reach TikTok and parse its answers.
+
+on:
+  schedule:
+    - cron: "33 3 * * *"
+  workflow_dispatch:
+    inputs:
+      username:
+        description: TikTok username to check
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tiktok-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    name: Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      TIKTOK_LIVE_USERNAME: ${{ inputs.username || vars.TIKTOK_LIVE_USERNAME || 'tiktok' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+        # One retry
+      - name: Smoke test
+        run: go test -count=1 -run TestLive_Smoke -v ./internal/tiktok/ || (sleep 60 && go test -count=1 -run TestLive_Smoke -v ./internal/tiktok/)
