@@ -15,6 +15,7 @@ import (
 type fakeSource struct {
 	calls        []string
 	snapshot     *domain.Snapshot
+	resolveErr   error
 	streamErr    error
 	recording    *domain.Recording
 	recordingErr error
@@ -22,6 +23,13 @@ type fakeSource struct {
 
 func (f *fakeSource) record(method string) {
 	f.calls = append(f.calls, method)
+}
+
+func (f *fakeSource) ResolveChannel(_ context.Context, _ string) (domain.Channel, error) {
+	if f.resolveErr != nil {
+		return domain.Channel{}, f.resolveErr
+	}
+	return domain.Channel{Platform: domain.Twitch, ID: "u1", Username: "streamer"}, nil
 }
 
 func (f *fakeSource) FetchStream(_ context.Context, _ domain.Channel) (*domain.Snapshot, error) {
@@ -71,8 +79,7 @@ var testNow = time.Date(2026, 9, 17, 20, 0, 0, 0, time.UTC)
 func newPoller(src poll.Source, st poll.Store, onEnd domain.EndPolicy, opts ...poll.Option) *poll.Poller {
 	opts = append(opts, poll.WithClock(func() time.Time { return testNow }))
 
-	return poll.NewPoller(src, st,
-		domain.Channel{Platform: domain.Twitch, ID: "u1", Username: "streamer"},
+	return poll.NewPoller(src, st, "streamer",
 		poll.Config{Interval: time.Minute, EndGrace: 10 * time.Minute, WaitForRecording: onEnd.NeedsRecording()},
 		opts...,
 	)
@@ -562,4 +569,49 @@ func TestLastPoll(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPollUnavailableChannel(t *testing.T) {
+	t.Run("skips the poll and keeps running", func(t *testing.T) {
+		src := &fakeSource{resolveErr: errors.New("twitch user \"streamer\" not found"), snapshot: liveSnapshot()}
+		st := newStore(t, nil)
+		p := newPoller(src, st, domain.EndPolicyNone)
+
+		p.Poll(context.Background())
+
+		if len(src.calls) != 0 {
+			t.Errorf("source calls = %v, want none while the channel is unavailable", src.calls)
+		}
+		if st.GetSession() != nil {
+			t.Error("session stored for an unavailable channel")
+		}
+		if got := p.LastPoll(); !got.Equal(testNow) {
+			t.Errorf("LastPoll() = %v, want %v so health stays green", got, testNow)
+		}
+	})
+
+	t.Run("recovers once the channel resolves", func(t *testing.T) {
+		src := &fakeSource{resolveErr: errors.New("not found"), snapshot: liveSnapshot()}
+		st := newStore(t, nil)
+		p := newPoller(src, st, domain.EndPolicyNone)
+
+		p.Poll(context.Background())
+		src.resolveErr = nil
+		p.Poll(context.Background())
+
+		if got := mustGetSession(t, st); got.ID != "u1" || got.State != domain.SessionLive {
+			t.Errorf("session = %+v, want a live session for u1", got)
+		}
+	})
+
+	t.Run("ends a stored session of the same channel", func(t *testing.T) {
+		src := &fakeSource{resolveErr: errors.New("not found")}
+		st := newStore(t, liveSession(), liveDeliveryAt(1))
+
+		newPoller(src, st, domain.EndPolicyNone).Poll(context.Background())
+
+		if got := mustGetSession(t, st).State; got != domain.SessionClosed {
+			t.Errorf("state = %q, want %q", got, domain.SessionClosed)
+		}
+	})
 }
