@@ -14,8 +14,8 @@ import (
 
 // Response bodies, trimmed to the fields the client reads. To capture fresh ones:
 //
-//	curl -s 'https://www.tiktok.com/api-live/user/room/?aid=1988&sourceType=54&uniqueId=USERNAME'
-//	curl -s 'https://www.tiktok.com/oembed?url=https://www.tiktok.com/@USERNAME'
+//	curl -s -A 'AmPulsar (+https://github.com/am-kenny/ampulsar)' 'https://www.tiktok.com/api-live/user/room/?aid=1988&sourceType=54&uniqueId=USERNAME'
+//	curl -s -A 'AmPulsar (+https://github.com/am-kenny/ampulsar)' 'https://www.tiktok.com/oembed?url=https://www.tiktok.com/@USERNAME'
 const (
 	username  = "test_user"
 	startTime = 1758276000
