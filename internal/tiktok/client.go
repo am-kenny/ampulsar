@@ -54,7 +54,8 @@ type liveRoomData struct {
 }
 
 type Client struct {
-	apiURL string
+	apiURL    string
+	userAgent string
 
 	timeout    time.Duration
 	httpClient *http.Client
@@ -62,8 +63,9 @@ type Client struct {
 
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		apiURL:  "https://www.tiktok.com",
-		timeout: 10 * time.Second,
+		apiURL:    "https://www.tiktok.com",
+		userAgent: UserAgent(""),
+		timeout:   10 * time.Second,
 	}
 
 	for _, opt := range opts {
@@ -85,6 +87,19 @@ func WithTimeout(d time.Duration) Option {
 	return func(c *Client) { c.timeout = d }
 }
 
+func WithUserAgent(ua string) Option {
+	return func(c *Client) { c.userAgent = ua }
+}
+
+// UserAgent names the bot and repository, with the app version when known
+func UserAgent(version string) string {
+	app, repo := "AmPulsar", " (+https://github.com/am-kenny/ampulsar)"
+	if version == "" {
+		return app + repo
+	}
+	return app + "/" + version + repo
+}
+
 func (tc *Client) doGet[T any](ctx context.Context, path string, params url.Values, result T) error {
 	u, err := url.Parse(tc.apiURL)
 	if err != nil {
@@ -97,6 +112,7 @@ func (tc *Client) doGet[T any](ctx context.Context, path string, params url.Valu
 	if err != nil {
 		return err
 	}
+	req.Header.Set("User-Agent", tc.userAgent)
 
 	resp, err := tc.httpClient.Do(req)
 	if err != nil {

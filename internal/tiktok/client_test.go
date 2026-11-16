@@ -14,8 +14,8 @@ import (
 
 // Response bodies, trimmed to the fields the client reads. To capture fresh ones:
 //
-//	curl -s 'https://www.tiktok.com/api-live/user/room/?aid=1988&sourceType=54&uniqueId=USERNAME'
-//	curl -s 'https://www.tiktok.com/oembed?url=https://www.tiktok.com/@USERNAME'
+//	curl -s -A 'AmPulsar (+https://github.com/am-kenny/ampulsar)' 'https://www.tiktok.com/api-live/user/room/?aid=1988&sourceType=54&uniqueId=USERNAME'
+//	curl -s -A 'AmPulsar (+https://github.com/am-kenny/ampulsar)' 'https://www.tiktok.com/oembed?url=https://www.tiktok.com/@USERNAME'
 const (
 	username  = "test_user"
 	startTime = 1758276000
@@ -55,6 +55,20 @@ func respond(t *testing.T, status int, body string) *tiktok.Client {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	})
+}
+
+func blockUntilDone(t *testing.T) http.HandlerFunc {
+	t.Helper()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	return func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
 }
 
 func TestFetchProfileHappyPath(t *testing.T) {
@@ -161,6 +175,9 @@ func TestUserRequestCarriesParams(t *testing.T) {
 		if r.URL.Path != "/api-live/user/room/" {
 			t.Errorf("path = %q, want /api-live/user/room/", r.URL.Path)
 		}
+		if ua := r.UserAgent(); ua != tiktok.UserAgent("") {
+			t.Errorf("User-Agent = %q, want %q", ua, tiktok.UserAgent(""))
+		}
 		for k, want := range map[string]string{"uniqueId": username, "aid": "1988", "sourceType": "54", "app_name": "tiktok_web"} {
 			if got := r.URL.Query().Get(k); got != want {
 				t.Errorf("query %s = %q, want %q", k, got, want)
@@ -168,6 +185,20 @@ func TestUserRequestCarriesParams(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(liveRoom))
 	})
+
+	if _, err := c.FetchUserByUsername(context.Background(), username); err != nil {
+		t.Fatalf("FetchUserByUsername: %v", err)
+	}
+}
+
+func TestUserAgentOverride(t *testing.T) {
+	ua := tiktok.UserAgent("v1.2.3")
+	c := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.UserAgent(); got != ua {
+			t.Errorf("User-Agent = %q, want %q", got, ua)
+		}
+		_, _ = w.Write([]byte(liveRoom))
+	}, tiktok.WithUserAgent(ua))
 
 	if _, err := c.FetchUserByUsername(context.Background(), username); err != nil {
 		t.Fatalf("FetchUserByUsername: %v", err)
@@ -342,16 +373,13 @@ func TestCancelledContextAborts(t *testing.T) {
 	}
 }
 
-func blockUntilDone(t *testing.T) http.HandlerFunc {
-	t.Helper()
-
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-
-	return func(_ http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
+func TestUserAgent(t *testing.T) {
+	for version, want := range map[string]string{
+		"":       "AmPulsar (+https://github.com/am-kenny/ampulsar)",
+		"v1.2.3": "AmPulsar/v1.2.3 (+https://github.com/am-kenny/ampulsar)",
+	} {
+		if got := tiktok.UserAgent(version); got != want {
+			t.Errorf("UserAgent(%q) = %q, want %q", version, got, want)
 		}
 	}
 }
