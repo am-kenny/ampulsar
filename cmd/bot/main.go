@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -14,7 +13,6 @@ import (
 	"github.com/adrg/xdg"
 
 	"github.com/am-kenny/ampulsar/internal/config"
-	"github.com/am-kenny/ampulsar/internal/domain"
 	"github.com/am-kenny/ampulsar/internal/health"
 	"github.com/am-kenny/ampulsar/internal/message"
 	"github.com/am-kenny/ampulsar/internal/poll"
@@ -47,7 +45,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	source, channel, err := buildSource(ctx, cfg)
+	source, channelName, err := buildSource(cfg)
 	if err != nil {
 		slog.Error("build source failed", "err", err)
 		os.Exit(1)
@@ -88,7 +86,7 @@ func main() {
 		WaitForRecording: cfg.Telegram.OnEnd.NeedsRecording(),
 	}
 
-	poller := poll.NewPoller(source, st, channel, pollCfg,
+	poller := poll.NewPoller(source, st, channelName, pollCfg,
 		poll.WithKick(reconciler.Kick),
 	)
 
@@ -102,7 +100,7 @@ func main() {
 	}
 	slog.Info("Health server listening", "addr", healthServer.Addr())
 
-	slog.Info("Starting poll and reconcile", "channel", channel.Username)
+	slog.Info("Starting poll and reconcile", "channel", channelName)
 
 	var wg sync.WaitGroup
 	wg.Go(func() { healthServer.Run(ctx) })
@@ -113,27 +111,18 @@ func main() {
 	slog.Info("Shutting down")
 }
 
-func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.Channel, error) {
+// buildSource returns the configured source and channel name.
+func buildSource(cfg *config.Config) (poll.Source, string, error) {
 	switch {
 	case cfg.Twitch.Enabled:
-		s := twitch.NewSource(twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret))
-		ch, err := s.ResolveChannel(ctx, cfg.Twitch.ChannelName)
-		if err != nil {
-			return nil, domain.Channel{}, fmt.Errorf("resolve twitch channel %q: %w", cfg.Twitch.ChannelName, err)
-		}
-		return s, ch, nil
+		return twitch.NewSource(twitch.NewClient(cfg.Twitch.ClientID, cfg.Twitch.ClientSecret)), cfg.Twitch.ChannelName, nil
 
 	case cfg.TikTok.Enabled:
 		ua := tiktok.WithUserAgent(tiktok.UserAgent(version))
-		s := tiktok.NewSource(tiktok.NewClient(ua))
-		ch, err := s.ResolveChannel(ctx, cfg.TikTok.Username)
-		if err != nil {
-			return nil, domain.Channel{}, fmt.Errorf("resolve tiktok channel %q: %w", cfg.TikTok.Username, err)
-		}
-		return s, ch, nil
+		return tiktok.NewSource(tiktok.NewClient(ua)), cfg.TikTok.Username, nil
 
 	default:
-		return nil, domain.Channel{}, errors.New("no source platform configured")
+		return nil, "", errors.New("no source platform configured")
 	}
 }
 
