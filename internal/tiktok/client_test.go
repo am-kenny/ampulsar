@@ -161,6 +161,9 @@ func TestUserRequestCarriesParams(t *testing.T) {
 		if r.URL.Path != "/api-live/user/room/" {
 			t.Errorf("path = %q, want /api-live/user/room/", r.URL.Path)
 		}
+		if ua := r.UserAgent(); ua != tiktok.DefaultUserAgent {
+			t.Errorf("User-Agent = %q, want %q", ua, tiktok.DefaultUserAgent)
+		}
 		for k, want := range map[string]string{"uniqueId": username, "aid": "1988", "sourceType": "54", "app_name": "tiktok_web"} {
 			if got := r.URL.Query().Get(k); got != want {
 				t.Errorf("query %s = %q, want %q", k, got, want)
@@ -353,5 +356,19 @@ func blockUntilDone(t *testing.T) http.HandlerFunc {
 		case <-release:
 		case <-r.Context().Done():
 		}
+	}
+}
+
+func TestUserAgentOverride(t *testing.T) {
+	const ua = "AmPulsar/1.2.3 (+https://github.com/am-kenny/ampulsar)"
+	c := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.UserAgent(); got != ua {
+			t.Errorf("User-Agent = %q, want %q", got, ua)
+		}
+		_, _ = w.Write([]byte(liveRoom))
+	}, tiktok.WithUserAgent(ua))
+
+	if _, err := c.FetchUserByUsername(context.Background(), username); err != nil {
+		t.Fatalf("FetchUserByUsername: %v", err)
 	}
 }
