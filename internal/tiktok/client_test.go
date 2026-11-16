@@ -161,8 +161,8 @@ func TestUserRequestCarriesParams(t *testing.T) {
 		if r.URL.Path != "/api-live/user/room/" {
 			t.Errorf("path = %q, want /api-live/user/room/", r.URL.Path)
 		}
-		if ua := r.UserAgent(); ua != tiktok.DefaultUserAgent {
-			t.Errorf("User-Agent = %q, want %q", ua, tiktok.DefaultUserAgent)
+		if ua := r.UserAgent(); ua != tiktok.UserAgent("") {
+			t.Errorf("User-Agent = %q, want %q", ua, tiktok.UserAgent(""))
 		}
 		for k, want := range map[string]string{"uniqueId": username, "aid": "1988", "sourceType": "54", "app_name": "tiktok_web"} {
 			if got := r.URL.Query().Get(k); got != want {

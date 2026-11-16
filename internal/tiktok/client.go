@@ -19,8 +19,6 @@ const (
 	roomStatusEnded  = 4
 )
 
-const DefaultUserAgent = "AmPulsar (+https://github.com/am-kenny/ampulsar)"
-
 // ErrNoLiveRoom means TikTok has no LIVE room for the username: the user
 // either does not exist or has never gone live.
 var ErrNoLiveRoom = errors.New("no live room")
@@ -56,7 +54,7 @@ type liveRoomData struct {
 }
 
 type Client struct {
-	apiURL string
+	apiURL    string
 	userAgent string
 
 	timeout    time.Duration
@@ -65,9 +63,9 @@ type Client struct {
 
 func NewClient(opts ...Option) *Client {
 	c := &Client{
-		apiURL:  "https://www.tiktok.com",
-		userAgent: DefaultUserAgent,
-		timeout: 10 * time.Second,
+		apiURL:    "https://www.tiktok.com",
+		userAgent: UserAgent(""),
+		timeout:   10 * time.Second,
 	}
 
 	for _, opt := range opts {
@@ -91,6 +89,15 @@ func WithTimeout(d time.Duration) Option {
 
 func WithUserAgent(ua string) Option {
 	return func(c *Client) { c.userAgent = ua }
+}
+
+// UserAgent names the bot and repository, with the app version when known
+func UserAgent(version string) string {
+	app, repo := "AmPulsar", " (+https://github.com/am-kenny/ampulsar)"
+	if version == "" {
+		return app + repo
+	}
+	return app + "/" + version + repo
 }
 
 func (tc *Client) doGet[T any](ctx context.Context, path string, params url.Values, result T) error {

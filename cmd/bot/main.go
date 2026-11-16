@@ -124,7 +124,7 @@ func buildSource(ctx context.Context, cfg *config.Config) (poll.Source, domain.C
 		return s, ch, nil
 
 	case cfg.TikTok.Enabled:
-		ua := tiktok.WithUserAgent("AmPulsar/" + version + " (+https://github.com/am-kenny/ampulsar)")
+		ua := tiktok.WithUserAgent(tiktok.UserAgent(version))
 		s := tiktok.NewSource(tiktok.NewClient(ua))
 		ch, err := s.ResolveChannel(ctx, cfg.TikTok.Username)
 		if err != nil {
