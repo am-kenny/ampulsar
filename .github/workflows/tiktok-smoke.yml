@@ -3,6 +3,7 @@ name: TikTok smoke test
 # Checks that the TikTok client can reach TikTok and parse its answers.
 
 on:
+  pull_request:
   schedule:
     - cron: "33 3 * * *"
   workflow_dispatch:
